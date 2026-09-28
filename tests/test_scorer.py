@@ -33,16 +33,18 @@ def test_batched_equals_single_in_fp32(scorer):
     state, questions = parse_request(JEV_EXAMPLE)
     sequences = [scorer.encode(state, q, list(range(len(q.options)))) for q in questions]
     counts = [len(q.options) for q in questions]
-    batched, _ = scorer.slot_logits(sequences, counts)
+    batched = scorer.slot_logits(sequences, counts)
+    # Su CPU batch e singolo coincidono (~1e-5). Su GPU i kernel veloci (flash-linear-attention,
+    # causal-conv1d) non sono esatti al bit con padding diversi: ~3e-3 sui logit, irrilevante per le decisioni.
+    tolerance = 1e-3 if scorer.device.type == "cpu" else 1e-2
     for seq, n, together in zip(sequences, counts, batched):
-        [alone], _ = scorer.slot_logits([seq], [n])
-        assert np.abs(alone - together).max() < 1e-3
+        [alone] = scorer.slot_logits([seq], [n])
+        assert np.abs(alone - together).max() < tolerance
 
 
-def test_last_exit_matches_final_readout(scorer):
-    state, questions = parse_request(JEV_EXAMPLE)
-    sequences = [scorer.encode(state, q, list(range(len(q.options)))) for q in questions]
-    counts = [len(q.options) for q in questions]
-    finals, exits = scorer.slot_logits(sequences, counts, exit_layers=[scorer.num_layers - 1])
-    for final, inter in zip(finals, exits):
-        assert np.abs(final - inter[0]).max() < 1e-3
+def test_status_and_open_answer(scorer):
+    body = {**JEV_EXAMPLE, "min_confidence": 0.99,
+            "questions": {**JEV_EXAMPLE["questions"], "word": {"type": "open", "instructions": "Main topic, one word?"}}}
+    answers = scorer.decide(body)["answers"]
+    assert answers["department"]["status"] in ("decided", "uncertain") and answers["department"]["min_confidence"] == 0.99
+    assert answers["word"]["type"] == "open" and answers["word"]["answer"]

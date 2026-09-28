@@ -2,9 +2,9 @@
 
     egeria info
     egeria decide   --model M richiesta.json
-    egeria predict  --model M --split test --out pred.jsonl [--exits blocks]
+    egeria predict  --model M --split test --out pred.jsonl
     egeria calibrate --predictions pred-train.jsonl --out temperature.json
-    egeria evaluate --predictions pred-test.jsonl [--temperatures temperature.json] [--depth]
+    egeria evaluate --predictions pred-test.jsonl [--temperatures temperature.json]
 """
 
 from __future__ import annotations
@@ -64,21 +64,12 @@ def cmd_decide(args) -> int:
     args.vision = args.vision or is_multimodal(body.get("state"))
     if args.recall and "memory" not in body:
         body["memory"] = {"recall": args.recall}
-    temperatures, exit_temperatures = load_temperatures(args.temperatures)
     response = _scorer(args).decide(
-        body, permutations=args.permutations, temperatures=temperatures, exit_temperatures=exit_temperatures,
+        body, permutations=args.permutations, temperatures=load_temperatures(args.temperatures),
         default_min_confidence=args.min_confidence, memory=_memory(args),
     )
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0
-
-
-def _exit_layers(scorer, mode: str) -> list[int] | None:
-    if mode == "none":
-        return None
-    if mode == "all":
-        return list(range(scorer.num_layers))
-    return scorer.block_exits or [scorer.num_layers - 1]
 
 
 def cmd_predict(args) -> int:
@@ -86,9 +77,7 @@ def cmd_predict(args) -> int:
     from .schema import parse_request
 
     scorer = _scorer(args)
-    exit_layers = _exit_layers(scorer, args.exits)
     cases = list(load_typed_decisions(args.split, args.config, args.limit))
-    memory = _memory(args)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     total_decisions = 0
@@ -97,13 +86,7 @@ def cmd_predict(args) -> int:
         for number, case in enumerate(cases, 1):
             state, questions = parse_request(case["body"])
             case_start = time.perf_counter()
-            memories, recalled = None, []
-            if memory is not None and args.recall and args.inject:
-                vector = scorer.analyze_state(state)[0]["embedding"]
-                # Il caso stesso non va richiamato (serve quando si predice sullo split della memoria).
-                recalled = memory.search(vector, args.recall, exclude={case["id"]})
-                memories = [item.render() for _, item in recalled]
-            scores = scorer.score(state, questions, args.permutations, exit_layers, memories=memories)
+            scores = scorer.score(state, questions, args.permutations)
             case_ms = (time.perf_counter() - case_start) * 1000
             for s in scores:
                 gold, label = gold_vector(s.question, case["gold"][s.question.id])
@@ -120,11 +103,6 @@ def cmd_predict(args) -> int:
                     "input_tokens": s.input_tokens,
                     "case_ms": case_ms,
                 }
-                if recalled:
-                    record["memories"] = [[item.id, round(score, 4)] for score, item in recalled]
-                if s.exit_logits is not None:
-                    record["exit_layers"] = s.exit_layers
-                    record["exit_logits"] = s.exit_logits.tolist()
                 handle.write(json.dumps(record) + "\n")
                 total_decisions += 1
             if number % 20 == 0 or number == len(cases):
@@ -133,9 +111,7 @@ def cmd_predict(args) -> int:
     meta = {
         "model": args.model, "dtype": args.dtype, "quantize": args.quantize, "prompt_style": args.prompt_style,
         "permutations": args.permutations, "split": args.split, "config": args.config, "cases": len(cases),
-        "memory": args.memory, "recall": args.recall,
-        "decisions": total_decisions, "num_layers": scorer.num_layers, "exit_layers": exit_layers,
-        "seconds": time.perf_counter() - started,
+        "decisions": total_decisions, "seconds": time.perf_counter() - started,
     }
     out.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     print(json.dumps(meta, indent=2))
@@ -151,12 +127,9 @@ def _read_predictions(path: str) -> tuple[list[dict], dict]:
 
 def cmd_calibrate(args) -> int:
     from .calibration import fit_by_type
-    from .depth import fit_exit_temperatures
 
     records, _ = _read_predictions(args.predictions)
-    temperatures: dict = fit_by_type(records)
-    if all("exit_logits" in r for r in records):
-        temperatures["exits"] = {"layers": records[0]["exit_layers"], **fit_exit_temperatures(records)}
+    temperatures = fit_by_type(records)
     Path(args.out).write_text(json.dumps(temperatures, indent=2))
     print(json.dumps(temperatures, indent=2))
     return 0
@@ -169,11 +142,10 @@ def _fmt(row: dict, keys) -> str:
 def cmd_evaluate(args) -> int:
     from .calibration import load_temperatures
     from .confidence import softmax
-    from .depth import oracle, per_layer_summary, sweep
     from .metrics import flip_rate, summarize, summarize_by
 
     records, meta = _read_predictions(args.predictions)
-    temperatures, exit_temperatures = load_temperatures(args.temperatures)
+    temperatures = load_temperatures(args.temperatures)
     for record in records:
         record["probs"] = softmax(record["option_logits"], temperatures.get(record["type"], 1.0))
     keys = ("n", "accuracy", "nll", "kl", "brier_mean", "ece", "mean_confidence", "coverage_at_5")
@@ -204,23 +176,6 @@ def cmd_evaluate(args) -> int:
         report["prior"] = summarize(prior)
         print("prior   ", _fmt(report["prior"], keys))
 
-    if args.depth:
-        if not all("exit_logits" in r for r in records):
-            print("--depth richiede predizioni generate con --exits", file=sys.stderr)
-            return 2
-        num_layers = meta.get("num_layers") or (records[0]["exit_layers"][-1] + 1)
-        report["depth_layers"] = per_layer_summary(records, exit_temperatures)
-        report["depth_sweep"] = sweep(records, exit_temperatures, num_layers)
-        report["depth_oracle"] = oracle(records, num_layers)
-        print("\nreadout per layer di uscita (temperature per layer:", "fittate)" if exit_temperatures else "T=1)")
-        for row in report["depth_layers"]:
-            print(f"  layer {row['layer']:3d}", _fmt(row, ("accuracy", "nll", "brier", "ece", "coverage_at_5")))
-        print("early exit per soglia di confidenza:")
-        for row in report["depth_sweep"]:
-            print(f"  soglia {row['threshold']:.2f}", _fmt(row, ("compute", "agree_full", "accuracy", "nll", "ece")), row["exit_histogram"])
-        best = report["depth_oracle"]
-        print(f"oracolo (uscita al primo layer da cui l'argmax non cambia più): compute={best['compute']:.3f}",
-              best["stable_from"])
     if args.report:
         Path(args.report).write_text(json.dumps(report, indent=2, default=float))
     return 0
@@ -251,7 +206,7 @@ def _calibrated(path: str, temperatures_path: str | None) -> list[dict]:
     from .confidence import softmax
 
     records, _ = _read_predictions(path)
-    temperatures, _ = load_temperatures(temperatures_path)
+    temperatures = load_temperatures(temperatures_path)
     for record in records:
         record["probs"] = softmax(record["option_logits"], temperatures.get(record["type"], 1.0))
     return records
@@ -286,10 +241,9 @@ def cmd_paired(args) -> int:
 def cmd_suite(args) -> int:
     """Suite di richieste con risposte attese: una riga JSON per caso {id, body, expected}."""
     from .calibration import load_temperatures
-    from .confidence import softmax
     from .schema import parse_request
 
-    temperatures, exit_temperatures = load_temperatures(args.temperatures)
+    temperatures = load_temperatures(args.temperatures)
     scorer = _scorer(args)
     cases = [json.loads(line) for line in Path(args.suite).read_text().splitlines() if line.strip()]
     rows = []
@@ -297,8 +251,7 @@ def cmd_suite(args) -> int:
     for case in cases:
         body = case["body"]
         started = time.perf_counter()
-        response = scorer.decide(body, args.permutations, temperatures, exit_temperatures,
-                                 default_min_confidence=args.min_confidence)
+        response = scorer.decide(body, args.permutations, temperatures, default_min_confidence=args.min_confidence)
         elapsed += time.perf_counter() - started
         _, questions = parse_request(body, args.min_confidence)
         for q in questions:
@@ -306,14 +259,12 @@ def cmd_suite(args) -> int:
             probs = result.get("probabilities") or {"true": result.get("noul"), "false": 1 - result.get("noul", 0)}
             expected = str(case["expected"][q.id])
             chosen = max(probs, key=probs.get)
-            depth = result.get("depth", scorer.num_layers)
             rows.append({
                 "case": case["id"], "question": q.id, "type": q.type, "expected": expected, "chosen": chosen,
-                "p_expected": float(probs[expected]), "correct": chosen == expected, "depth": depth,
-                "status": result.get("status"),
+                "p_expected": float(probs[expected]), "correct": chosen == expected, "status": result.get("status"),
             })
             mark = "ok " if chosen == expected else "NO "
-            extra = f" layer={depth:2d}/{scorer.num_layers} {result.get('status') or ''}" if "depth" in result else ""
+            extra = f" {result['status']}" if result.get("status") else ""
             print(f"{mark} {case['id'][:22]:22s} {q.id[:18]:18s} atteso={expected:16s} scelto={chosen:16s} "
                   f"p(atteso)={rows[-1]['p_expected']:.2f}{extra}")
     correct = np.mean([r["correct"] for r in rows])
@@ -321,10 +272,8 @@ def cmd_suite(args) -> int:
     print(f"\n{args.model}: {int(sum(r['correct'] for r in rows))}/{len(rows)} corrette "
           f"({correct:.0%}), p(atteso) media {p_expected:.2f}, tempo {elapsed:.2f} s")
     if args.min_confidence is not None:
-        depth = np.mean([r["depth"] for r in rows]) / scorer.num_layers
         uncertain = sum(r["status"] == "uncertain" for r in rows)
-        print(f"  min_confidence={args.min_confidence}: profondità media {depth:.2f} del modello, "
-              f"{uncertain}/{len(rows)} incerte (sotto soglia anche all'ultimo layer)")
+        print(f"  min_confidence={args.min_confidence}: {uncertain}/{len(rows)} incerte (sotto soglia)")
     for qtype in ("noul", "choice", "score"):
         subset = [r for r in rows if r["type"] == qtype]
         if subset:
@@ -410,10 +359,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--split", default="test", choices=["train", "test"])
     p.add_argument("--config", default="all")
     p.add_argument("--limit", type=int)
-    p.add_argument("--exits", default="none", choices=["none", "blocks", "all"])
-    p.add_argument("--memory", help="cartella dell'archivio dei ricordi")
-    p.add_argument("--recall", type=int, default=0, help="ricordi da richiamare per ogni caso")
-    p.add_argument("--inject", action="store_true", help="mettere i ricordi richiamati nel prompt (esperimento)")
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_predict)
 
@@ -432,7 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--image-max-side", type=int, help="lato massimo delle immagini (usare lo stesso valore delle richieste)")
     p.set_defaults(func=cmd_memory)
 
-    p = sub.add_parser("calibrate", help="fitta le temperature per tipo (e per layer di uscita)")
+    p = sub.add_parser("calibrate", help="fitta le temperature per tipo di domanda")
     p.add_argument("--predictions", required=True)
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_calibrate)
@@ -440,7 +385,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("evaluate", help="metriche sulle predizioni")
     p.add_argument("--predictions", required=True)
     p.add_argument("--temperatures")
-    p.add_argument("--depth", action="store_true", help="analisi della profondità dinamica")
     p.add_argument("--prior", help="predizioni del train: stampa il riferimento che non legge lo stato")
     p.add_argument("--report", help="salva il report completo in JSON")
     p.set_defaults(func=cmd_evaluate)
@@ -489,7 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("suite", help="file JSONL: {id, body, expected}")
     p.add_argument("--temperatures")
     p.add_argument("--min-confidence", type=float,
-                   help="default del server per min_confidence (profondità dinamica); senza: modello completo")
+                   help="default per min_confidence: sotto la soglia la risposta è 'uncertain'")
     p.add_argument("--out")
     p.set_defaults(func=cmd_suite)
     return parser
