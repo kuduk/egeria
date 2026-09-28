@@ -1,10 +1,11 @@
-"""Memoria a lungo termine: ricordi richiamati per somiglianza e messi nel contesto.
+"""Memoria a lungo termine: ricordi richiamati per somiglianza.
 
 Un ricordo è uno stato passato con le decisioni prese (idealmente confermate da un
 esito o da una correzione umana) e una nota libera opzionale. Si indicizza con
 l'embedding dello stato (`DecisionScorer.analyze_state`, media sui token) e si
-richiama per similarità coseno. I ricordi richiamati entrano nel prompt prima dello
-stato corrente, così il modello decide avendoli sott'occhio (in-context).
+richiama per similarità coseno. I ricordi richiamati tornano nella risposta, e le loro
+decisioni votano sulle domande che coprono. Non entrano nel prompt: zero-shot non
+migliorava le decisioni (documentazione/06-memoria.md).
 
 Gli hidden state di un LLM sono anisotropi: tutte le coppie hanno coseno alto.
 Con abbastanza ricordi si sottrae la media dell'archivio prima del coseno.
@@ -22,7 +23,6 @@ import numpy as np
 from .schema import render_value
 
 CENTER_MIN_ITEMS = 20
-MAX_STATE_CHARS = 600
 # Il voto usa fino a 10 ricordi: con meno è troppo sicuro (typed-decisions: NLL 1.22 con 3, 0.96 con 10).
 VOTE_K = 10
 VOTE_SMOOTHING = 0.1
@@ -38,18 +38,6 @@ class Memory:
     decisions: dict[str, str] = field(default_factory=dict)
     note: str = ""
     meta: dict = field(default_factory=dict)
-
-    def render(self, max_chars: int = MAX_STATE_CHARS) -> str:
-        """Testo del ricordo per il prompt: stato (troncato), decisioni e nota."""
-        state = describe_state(self.state)
-        if len(state) > max_chars:
-            state = state[:max_chars] + " [...]"
-        parts = [f"State: {state}"]
-        if self.decisions:
-            parts.append("Decisions: " + "; ".join(f"{k} = {v}" for k, v in self.decisions.items()))
-        if self.note:
-            parts.append(f"Note: {self.note}")
-        return "\n".join(parts)
 
 
 def describe_state(state: Any) -> str:
@@ -185,8 +173,6 @@ def decisions_from_answers(answers: dict) -> dict[str, str]:
             summary[qid] = result["choice"]
         elif kind == "score":
             summary[qid] = f"level {round(result['score'])}"
-        elif kind == "rank":
-            summary[qid] = " > ".join(result["ranking"])
         elif kind == "number":
             summary[qid] = f"{result['value']:g}"
         elif kind == "open":
@@ -245,49 +231,39 @@ def memory_entry(score: float, item: "Memory") -> dict:
     return {"id": item.id, "similarity": round(float(score), 4), "decisions": item.decisions, "note": item.note}
 
 
-def needs_embedding(body: dict, questions, store) -> bool:
+def needs_embedding(body: dict, store) -> bool:
     """Serve il vettore dello stato per consultare la memoria?"""
     from .schema import memory_options
 
     if store is None or not len(store):
         return False
-    return memory_options(body)["recall"] > 0 or any(q.type == "recall" for q in questions)
+    return memory_options(body)["recall"] > 0
 
 
 def memory_context(body: dict, questions, store, embedding) -> dict:
-    """Tutto ciò che la memoria aggiunge a una decisione, dato il vettore dello stato.
+    """Ciò che la memoria aggiunge a una decisione, dato il vettore dello stato.
 
     - recalled: i ricordi da restituire (`memory.recall`);
-    - prompt: il testo dei ricordi da mettere nel prompt (`memory.inject`), oppure None;
-    - votes: il voto dei ricordi per ogni domanda che coprono (`memory.vote`);
-    - recall_answers: le risposte alle domande di tipo `recall`.
+    - votes: il voto dei ricordi per ogni domanda che coprono (`memory.vote`).
     """
     from .schema import memory_options
 
     options = memory_options(body)
-    context = {"recalled": [], "prompt": None, "votes": {}, "recall_answers": {}}
-    if store is None:
+    context = {"recalled": [], "votes": {}}
+    if store is None or options["recall"] == 0 or not len(store):
         return context
-    if options["recall"] > 0 and len(store):
-        found = store.search(embedding, max(options["recall"], VOTE_K), options["min_similarity"])
-        context["recalled"] = found[: options["recall"]]
-        if options["inject"]:
-            context["prompt"] = [item.render() for _, item in context["recalled"]] or None
-        if options["vote"]:
-            context["votes"] = memory_votes(questions, found[:VOTE_K])
-    for question in questions:
-        if question.type == "recall":
-            found = store.search(embedding, question.params["k"]) if len(store) else []
-            context["recall_answers"][question.id] = {"type": "recall", "memories": [memory_entry(s, i) for s, i in found]}
+    found = store.search(embedding, max(options["recall"], VOTE_K), options["min_similarity"])
+    context["recalled"] = found[: options["recall"]]
+    if options["vote"]:
+        context["votes"] = memory_votes(questions, found[:VOTE_K])
     return context
 
 
 def apply_memory_context(response: dict, context: dict, body: dict, questions) -> dict:
-    """Aggiunge a una risposta del modello i voti, le domande recall e i ricordi richiamati."""
+    """Aggiunge a una risposta del modello il voto dei ricordi e i ricordi richiamati."""
     from .schema import memory_options
 
     answers = response.setdefault("answers", {})
-    answers.update(context["recall_answers"])
     for qid, vote in context["votes"].items():
         if qid in answers:
             answers[qid]["memory"] = vote

@@ -5,6 +5,8 @@
 > **Proposta.** Ogni asserzione (domanda) usa solo la profondità di calcolo che le serve. Le decisioni facili escono presto, quelle incerte proseguono.
 >
 > **Stato.** Misurazione di fattibilità in F0 con readout "logit lens" ai confini di blocco. Risultati in [03-baseline-f0.md](03-baseline-f0.md).
+>
+> **Abbandonata il 29/09/2026.** Il risparmio potenziale (oracolo) era del 27–36%, ma quello ottenuto zero-shot con la confidenza solo dello 0.5–4%, e il percorso di esecuzione a blocchi complicava lo scorer. Il codice (uscita anticipata, letture intermedie, temperature per layer, `depth.py`, `--exits`, `--depth`) è stato tolto. `min_confidence` è rimasto: oggi serve solo a marcare le risposte incerte (`status`). Il documento resta come traccia dell'idea e delle misure.
 
 ## 1. Perché si adatta bene a un modello System 1
 

@@ -113,8 +113,8 @@ Le risposte sono identiche e le probabilità coincidono entro il rumore bf16.
 - **Il vero limite è il costo fisso per passaggio**: 42 ms per una domanda sul 0.8B, di cui solo 8 ms di torre visiva.
 
 **Prossimi passi per il tempo reale:**
-1. **CUDA graphs sul nostro ciclo dei layer.** `torch.compile` si spezza sui kernel custom. In streaming però le forme sono fisse, quindi si può catturare a mano il ciclo blocco per blocco dello scorer, con maschere e rotary precalcolate, per il prefisso e per le code. È l'attacco diretto al costo fisso.
-2. **Profondità dinamica.** In un flusso video la maggior parte dei fotogrammi è "non succede nulla", con risposte molto sicure (il gatto: "nessuna azione", "pericolo: no" a 0.99). Sono i casi ideali per uscire presto.
+1. **CUDA graphs sul nostro ciclo dei layer.** `torch.compile` si spezza sui kernel custom. In streaming però le forme sono fisse, quindi si può catturare a mano il forward dello scorer, con maschere e rotary precalcolate, per il prefisso e per le code. È l'attacco diretto al costo fisso.
+2. **Profondità dinamica** (abbandonata il 29/09/2026). In un flusso video la maggior parte dei fotogrammi è "non succede nulla", con risposte molto sicure (il gatto: "nessuna azione", "pericolo: no" a 0.99): sarebbero stati i casi ideali per uscire presto. Zero-shot però il guadagno reale era dello 0.5–4% ([03-baseline-f0.md](03-baseline-f0.md) §6), e il codice è stato tolto.
 3. **Stato ricorrente fra fotogrammi.** I layer Gated DeltaNet hanno uno stato di dimensione fissa. In linea di principio si potrebbero processare solo i token del fotogramma nuovo, mantenendo lo stato: resterebbe da gestire la cache dei layer full-attention con una finestra. È da esplorare.
 4. **Cascata System 1 → System 2.** Le decisioni per fotogramma girano a 10–20 fps sul modello piccolo, e solo gli eventi `uncertain` o rilevanti vanno a un modello grande.
 
@@ -123,11 +123,9 @@ Le risposte sono identiche e le probabilità coincidono entro il rumore bf16.
 - **Stato.** È una **lista di parti**: `{"type": "text", "text": ...}` e `{"type": "image", "path" | "url" | "base64": ...}`. Più immagini sono ammesse e il loro ordine viene rispettato nel prompt.
 - **`image_max_side`** (opzionale, 64–4096): riduce le immagini, così i token visivi calano e la latenza scende (§4).
 - **Caricamento del modello.** `egeria decide` riconosce le immagini nello stato e carica da solo il modello completo con la torre visiva (`--vision` lo forza). La memoria del 2B in bf16 è 4.4 GB.
-- **Tipi di domanda supportati:** `noul`, `choice`, `score`, `rank`, `number`, con le permutazioni e `min_confidence` (lo `status` si calcola all'ultimo layer).
-- **`embed` e `memory` funzionano anche con le immagini:** il vettore include i token visivi. Verifica: 5/6 in [06-memoria.md](06-memoria.md) §6.
+- **Tipi di domanda supportati:** `noul`, `choice`, `score`, `number` e `open`, con le permutazioni e `min_confidence` (sotto la soglia la risposta è `uncertain`).
+- **La memoria e il vettore dello stato (`/v1/embed`) funzionano anche con le immagini:** il vettore include i token visivi. Verifica: 5/6 in [06-memoria.md](06-memoria.md) §6.
 - **`open` (una parola o un valore) funziona anche con le immagini** e legge date, importi e codici (§7).
-- **Non ancora supportati con le immagini:**
-  - l'uscita anticipata, perché le posizioni M-RoPE dei token visivi richiedono il ciclo dei layer adattato.
 - **Efficienza.** Il prompt con l'immagine si ripete per ogni domanda e permutazione. Con immagini piccole costa poco; con immagini grandi conviene il prefisso condiviso (§4), che è da integrare.
 
 ## 6. Esempi d'uso
@@ -196,7 +194,7 @@ Risposta reale (2B-Base, 2.3 s compreso il caricamento dell'immagine):
   "min_confidence": 0.6,
   "questions": {
     "incendio": {"type": "noul", "instructions": "C'è un incendio in corso?"},
-    "azione": {"type": "rank", "instructions": "Quale azione è più appropriata?",
+    "azione": {"type": "choice", "instructions": "Quale azione è più appropriata?",
                "criteria": {"chiamare_vigili": "Chiamare subito i vigili del fuoco",
                             "monitorare": "Monitorare la situazione", "nessuna": "Nessuna azione"}}
   }
@@ -205,7 +203,7 @@ Risposta reale (2B-Base, 2.3 s compreso il caricamento dell'immagine):
 
 ```json
 "incendio": {"type": "noul", "noul": 0.969, "confidence": 0.938, "min_confidence": 0.6, "status": "decided"},
-"azione": {"type": "rank", "ranking": ["chiamare_vigili", "nessuna", "monitorare"],
+"azione": {"type": "choice", "choice": "chiamare_vigili",
   "probabilities": {"chiamare_vigili": 0.942, "monitorare": 0.028, "nessuna": 0.030},
   "confidence": 0.913, "min_confidence": 0.6, "status": "decided"}
 ```

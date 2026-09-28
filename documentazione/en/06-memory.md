@@ -2,17 +2,17 @@
 
 # Memory: memories recalled by similarity
 
-> Status: **implemented**, for text and **images**. **Retrieval** works: the memory vote scores 0.56 versus 0.47 for the zero-shot model (text), and with photos the most similar memory belongs to the right category in 5 cases out of 6 (§6). Putting the memories **in the prompt** of the zero-shot model does not improve decisions, so it is an option that is off by default (`inject`).
+> Status: **implemented**, for text and **images**. **Retrieval** works: the memory vote scores 0.56 versus 0.47 for the zero-shot model (text), and with photos the most similar memory belongs to the right category in 5 cases out of 6 (§6). Putting the memories **in the prompt** of the zero-shot model did not improve decisions: the `inject` option was removed on 29/09/2026.
 
 ## 1. Idea
 
 Memory is **an object external to the model**: a store of past cases with the decisions taken (preferably confirmed by an outcome or a correction), notes and rules. Entries can be added, inspected and deleted **without retraining anything**.
 
-Given a new state, the most similar memories are retrieved through the state's `embed`, which comes for free from the same model, and returned in the output. For every question the memories cover, the **memory vote** is returned as well.
+Given a new state, the most similar memories are retrieved through the state vector, computed by the same model, and returned in the output. For every question the memories cover, the **memory vote** is returned as well.
 
 ## 2. Does retrieval work?
 
-**Minimal test** (6 sentences): the last-token hidden state is anisotropic, with cosine 0.91–0.97 for any pair. The **mean over the state tokens** separates much better, so `embed` uses the mean.
+**Minimal test** (6 sentences): the last-token hidden state is anisotropic, with cosine 0.91–0.97 for any pair. The **mean over the state tokens** separates much better, so the state vector uses the mean.
 
 **Test on decisions** (typed-decisions): for each test case, the 10 most similar train cases are retrieved and their decisions are used to predict.
 
@@ -49,7 +49,7 @@ Experiment: 2B-Base, 3 memories with their gold decisions in the prompt before t
 
 **Conclusion.** On repetitive decisions like these, similar cases that were already decided are worth more than the zero-shot model, and the 2B cannot yet exploit them in context. Therefore:
 - by default, memory **returns** the memories and their vote;
-- prompt injection is optional (`"inject": true`) and should be retried after training (F1), by teaching the model to use memories.
+- prompt injection (`inject`) was removed on 29/09/2026. It can be retried after training, by teaching the model to use memories.
 
 ## 4. API
 
@@ -69,7 +69,6 @@ Experiment: 2B-Base, 3 memories with their gold decisions in the prompt before t
 - `recall` (0–10): how many memories to return.
 - `min_similarity`: similarity threshold.
 - `vote` (default `true`): a vote for each covered question. It uses the 10 most similar memories that contain that question, weighted with softmax(similarity / 0.05), plus 10% smoothing.
-- `inject` (default `false`): also puts the memories in the prompt.
 
 **Real response** (2B-Base; test store with 3 memories, [examples/memoria_ticket.json](../../examples/memoria_ticket.json)):
 
@@ -111,7 +110,7 @@ The store is a folder with `memories.jsonl` (human-readable memories) and `vecto
 
 **What to save.** Only **confirmed** decisions (outcomes, human corrections). Saving the model's answers without verification would reinforce its errors; that is why `decide` never writes to memory.
 
-**Reproducible evaluation:** `scripts/eval_memoria.sh` (memories in the prompt, with `--inject`).
+**Evaluation of memories in the prompt:** the `scripts/eval_memoria.sh` script (with `--inject`) was removed on 29/09/2026 together with `inject`. The numbers in §3 are kept for reference.
 
 ## 6. Memory with images
 
@@ -145,22 +144,22 @@ Requests must use the same `image_max_side` the photos were stored with: the vec
 - **The model, when queried directly, correctly recognizes all 6 photos.** Disagreement between the memory vote and the model's answer is therefore the signal to stop and ask a human.
 - **With richer stores** (more examples per category, from different sources) the effect of visual appearance gets diluted.
 
-**Limitations:**
-- with images, `open` is not supported yet;
-- `inject` shows the memories' images only as a textual reference (`[image: percorso]`, where "percorso" is the path), without putting them back in the prompt.
+**Limitation:** in the store, the memories' images appear only as a reference (`[image: percorso]`, where "percorso" is the path): the image data is not copied.
 
 ## 7. Questions about memory
 
-### `recall`: "what does this remind you of?" (kept)
+### "What does this remind you of?": similar memories (kept)
 
-It is a question like any other: it returns the memories most similar to the state, with similarity, decisions and notes. Retrieval is the one verified above (§2 and §6). `instructions` is optional, because retrieval uses the state and not the question text; `k` ranges from 1 to 10.
+It is requested with `"memory": {"recall": k}` in the request (k from 1 to 10): the response lists in `memories` the memories most similar to the state, with similarity, decisions and notes, and, for the questions they cover, the memory vote. Retrieval is the one verified above (§2 and §6). In the interface the same thing is done from the *Ricordi* ("Memories") page, with *Cerca* ("Search") or *Cerca con un'immagine* ("Search with an image").
+
+Until 29/09/2026 there was also a `recall` question type that returned the same list: it was removed because it duplicated `memory.recall`.
 
 ```json
 {
   "state": [{"type": "text", "text": "Immagine ricevuta:"}, {"type": "image", "path": "examples/immagini/nuove/incendio2.jpg"}],
   "image_max_side": 448,
+  "memory": {"recall": 2},
   "questions": {
-    "ricorda": {"type": "recall", "instructions": "Cosa ti ricorda questa immagine?", "k": 2},
     "azione": {"type": "choice", "instructions": "Quale azione è appropriata?",
                "criteria": {"chiamare_vigili": "Chiamare i vigili del fuoco", "aprire_sinistro": "Aprire una pratica di sinistro", "nessuna": "Nessuna azione"}}
   }
@@ -174,13 +173,17 @@ It is a question like any other: it returns the memories most similar to the sta
 Real response: a store of 4 photos with notes ([examples/memoria_ricorda.json](../../examples/memoria_ricorda.json)), queried with a **new** photo of a different fire.
 
 ```json
-"ricorda": {"type": "recall", "memories": [
+"answers": {
+  "azione": {"type": "choice", "choice": "chiamare_vigili",
+    "probabilities": {"chiamare_vigili": 0.857, "aprire_sinistro": 0.050, "nessuna": 0.093}, "confidence": 0.786,
+    "memory": {"answer": "chiamare_vigili",
+               "probabilities": {"chiamare_vigili": 0.694, "aprire_sinistro": 0.230, "nessuna": 0.076}, "support": 4}}
+},
+"memories": [
   {"id": "foto-incendio-0812", "similarity": 0.8591, "decisions": {"azione": "chiamare_vigili"},
    "note": "Incendio in via Verdi, 12 agosto: vigili arrivati in 9 minuti"},
   {"id": "foto-sinistro-2026-0913", "similarity": 0.7985, "decisions": {"azione": "aprire_sinistro"},
-   "note": "Urto contro palo, pratica 2026-0913 liquidata"}]},
-"azione": {"type": "choice", "choice": "chiamare_vigili",
-  "probabilities": {"chiamare_vigili": 0.857, "aprire_sinistro": 0.050, "nessuna": 0.093}, "confidence": 0.786}
+   "note": "Urto contro palo, pratica 2026-0913 liquidata"}]
 ```
 
 ### `known`: "is this something you have in memory?" (not kept)
@@ -196,22 +199,24 @@ A store-relative measure (percentile with respect to the neighbors within the st
 - **text, same vs similar:** the typed-decisions cases are generated by text models and resemble each other almost as much as the modified copies do;
 - **images, similar vs new:** the errors caused by visual appearance come back (the phishing screenshot looks like a receipt; the colorful bike rack scores 0.83).
 
-**What remains usable, with caution.** `recall` returns the similarities, and the verification yields two practical rules:
+**What remains usable, with caution.** `memory.recall` returns the similarities, and the verification yields two practical rules:
 - **text:** similarity of the nearest memory below ~0.6 → the topic is absent from memory (here there was nothing between 0.29 and 0.90);
 - **images:** similarity ≥ ~0.94 → almost certainly the same photo, even when cropped (here between 0.908 and 0.956).
 
 These thresholds were measured on few cases and on these particular stores. They depend on the model, on `image_max_side` and, above 20 memories, on centering. For exact text duplicates, comparing the hash of the normalized text is enough.
 
-### Why `known` fails and how it could come back
+### Why `known` fails, and what remains
 
-**The common cause: `recall` ranks, `known` uses a threshold.** `recall` only has to rank the memories, and the ranking stays correct even with "squashed" similarities. `known` requires an absolute threshold, but the similarity scale depends on the model, the data type, the resolution and the store size (centering beyond 20 memories).
+> **Abandoned on 29/09/2026**, including as a training goal. The ideas below stay as a record; for "is this case outside what I know?" what remains is the out-of-domain calibration measurement (F0.5 in [02-implications-and-proposal.md](02-implications-and-proposal.md) §6) and `memory.min_similarity`.
+
+**The common cause: recall ranks, `known` uses a threshold.** Recall (`memory.recall`) only has to rank the memories, and the ranking stays correct even with "squashed" similarities. `known` requires an absolute threshold, but the similarity scale depends on the model, the data type, the resolution and the store size (centering beyond 20 memories).
 
 **Text, same vs similar.** The vector is a mean over the whole state: it represents *what kind of thing* the state is, not *which instance*. Different cases from the same flow (same structure, a few different values) have similarity 0.90–0.996; modified copies 0.95–0.996.
 
 **Images, similar vs new.** Visual tokens dominate the mean, so the vector mostly captures appearance (colors, composition, "a sheet with text"). The model, when queried directly, recognizes all 6 categories instead: the meaning is there, but it does not surface in the mean.
 
-**How it could come back:**
+**How it could have come back:**
 1. **Without training: retrieval + verification.** Retrieval finds the candidate; a `noul` with both states in the prompt asks "is it the same case?" / "is it the same kind of situation?". To be verified against the same thresholds.
 2. **F1, a dedicated loss on pairs** (the supervised equivalent of RLCD). It makes the probability of that `noul` calibrated. Pairs that can be built: modified copies and crops (same), different cases from the same flow or category (similar), topics and categories not in the store (new).
-3. **F1, contrastive embedding with LoRA.** Pulls vectors of the same type together and pushes the others apart, using hard examples (screenshot vs receipt). It also improves `recall` and the memory vote.
+3. **F1, contrastive embedding with LoRA.** Pulls vectors of the same type together and pushes the others apart, using hard examples (screenshot vs receipt). It also improves recall and the memory vote.
 4. **Same case in text:** a content check (hash of the normalized text, MinHash/Jaccard, identifying fields), which is more reliable than any semantic vector.

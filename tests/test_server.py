@@ -21,20 +21,15 @@ from egeria.server import Engine, answer_key, create_app, review_flags  # noqa: 
 class FakeScorer:
     """Risponde in modo deterministico: sceglie sempre la prima opzione, con probabilità decrescenti.
 
-    Come lo scorer vero, senza `memory` rifiuta le domande recall; ricorda l'ultima chiamata.
+    Ricorda ogni chiamata, per verificare che cosa il server web manda al modello.
     """
 
     def __init__(self):
         self.calls = []
 
-    def decide(self, body, permutations=1, temperatures=None, exit_temperatures=None,
-               default_min_confidence=None, memory=None):
-        from egeria.schema import RequestError
-
+    def decide(self, body, permutations=1, temperatures=None, default_min_confidence=None, memory=None):
         self.calls.append({"body": body, "permutations": permutations, "temperatures": temperatures})
         state, questions = parse_request(body, default_min_confidence)
-        if any(q.type == "recall" for q in questions) and memory is None:
-            raise RequestError("le domande recall richiedono una memoria (--memory)")
         answers = {}
         for q in questions:
             p = softmax(np.linspace(1.0, 0.0, len(q.options)) * (3 if "sicuro" in str(state) else 0.3))
@@ -44,7 +39,7 @@ class FakeScorer:
             answers[q.id] = result
         return {"model": "finto", "answers": answers, "usage": {"input_tokens": 1, "output_tokens": 0}}
 
-    def analyze_state(self, state, embed=True, image_max_side=None, images=None):
+    def analyze_state(self, state, image_max_side=None, images=None):
         digest = hashlib.sha256(str(state).encode()).digest()
         vector = np.frombuffer(digest, dtype=np.uint8).astype(np.float64)[:16]
         return {"embedding": (vector / np.linalg.norm(vector)).tolist(), "embedding_dim": 16}, 1
@@ -205,22 +200,19 @@ def test_client_token_and_unreachable_model(tmp_path, monkeypatch):
     assert web.get("/api/memory").status_code == 200  # storico e ricordi restano consultabili
 
 
-def test_web_handles_memory_and_recall(client, scorer):
+def test_web_handles_memory(client, scorer):
     client.post("/api/memory", json={"state": "bonifico respinto", "decisions": {"reparto": "tecnico"}, "note": "n"})
-    questions = {**QUESTIONS, "simili": {"type": "recall", "k": 2}}
-    body = {"state": "bonifico respinto", "questions": questions, "memory": {"recall": 1, "inject": True}}
+    body = {"state": "bonifico respinto", "questions": QUESTIONS, "memory": {"recall": 1}}
     response = client.post("/v1/systemone", json=body).json()
     sent = scorer.calls[-1]["body"]
-    assert "memory" not in sent and "simili" not in sent["questions"]  # al modello solo le sue domande
-    assert sent["memories"] and "bonifico respinto" in sent["memories"][0]
-    assert list(response["answers"]) == ["reparto", "urgente", "simili"]
-    assert response["answers"]["simili"]["memories"][0]["similarity"] == pytest.approx(1.0)
+    assert "memory" not in sent and "memories" not in sent  # al modello solo stato e domande
+    assert list(response["answers"]) == ["reparto", "urgente"]
     assert response["answers"]["reparto"]["memory"]["answer"] == "tecnico"
     assert response["memories"][0]["decisions"] == {"reparto": "tecnico"}
-    # solo domande recall: il modello non viene chiamato
-    calls = len(scorer.calls)
-    only = client.post("/v1/systemone", json={"state": "x", "questions": {"simili": {"type": "recall"}}}).json()
-    assert len(scorer.calls) == calls and only["answers"]["simili"]["type"] == "recall"
+    assert response["memories"][0]["similarity"] == pytest.approx(1.0)
+    # senza memory.recall la memoria non viene consultata
+    plain = client.post("/v1/systemone", json={"state": "bonifico respinto", "questions": QUESTIONS}).json()
+    assert "memories" not in plain and "memory" not in plain["answers"]["reparto"]
 
 
 def test_web_sends_images_inline(client, scorer, tmp_path):

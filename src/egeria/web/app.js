@@ -179,7 +179,7 @@ function intervalLabel(lo, hi, unit) {
 function labelsFor(apiQuestion) {
   switch (apiQuestion.type) {
     case "noul": return { true: "Sì", false: "No" };
-    case "choice": case "rank":
+    case "choice":
       return Object.fromEntries(Object.entries(apiQuestion.criteria).map(([k, v]) => [k, v || k]));
     case "score": return Object.fromEntries(apiQuestion.criteria.map((v, i) => [String(i), v]));
     case "number": {
@@ -247,7 +247,7 @@ function fromApi(apiQuestions) {
   return Object.values(apiQuestions).map((q) => {
     switch (q.type) {
       case "noul": return newQuestion({ text: q.instructions, kind: "yesno" });
-      case "choice": case "rank": return newQuestion({ text: q.instructions, kind: "choice", options: Object.entries(q.criteria).map(([k, v]) => v || k) });
+      case "choice": return newQuestion({ text: q.instructions, kind: "choice", options: Object.entries(q.criteria).map(([k, v]) => v || k) });
       case "score": return newQuestion({ text: q.instructions, kind: "scale", levels: [...q.criteria] });
       case "number": {
         const bins = (Array.isArray(q.criteria) ? q.criteria : q.criteria.bins).filter((x) => x !== null);
@@ -262,7 +262,6 @@ function modelKey(result) {
   switch (result.type) {
     case "noul": return result.noul >= 0.5 ? "true" : "false";
     case "choice": return result.choice;
-    case "rank": return result.ranking[0];
     case "score": case "number": { const entries = Object.entries(result.probabilities); return entries.reduce((a, b) => (b[1] > a[1] ? b : a))[0]; }
     case "open": return result.answer;
     default: return null;
@@ -389,7 +388,7 @@ function answerBlock(q, qid, result) {
     value = label(top);
     sure = result.probabilities[top];
     bars = Object.entries(result.probabilities);
-    if (result.type === "choice" || result.type === "rank") bars.sort((a, b) => b[1] - a[1]);
+    if (result.type === "choice") bars.sort((a, b) => b[1] - a[1]);
   }
   const classes = ["answer"];
   if (result.status === "uncertain") classes.push("uncertain");

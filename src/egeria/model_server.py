@@ -8,9 +8,8 @@ Tiene caricato il modello e risponde a tre chiamate:
 - `POST /v1/embed`: il vettore semantico di uno stato (per la memoria).
 
 Niente storico, niente ricordi, niente file: li tiene il server web (`egeria serve`), che
-chiama questo server via HTTP. I ricordi da mettere nel prompt arrivano già in testo
-(`"memories": [...]`). Le immagini arrivano in base64 (o url); i percorsi locali sono
-rifiutati, a meno di `--allow-paths`.
+chiama questo server via HTTP. Le immagini arrivano in base64 (o url); i percorsi locali
+sono rifiutati, a meno di `--allow-paths`.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import hmac
 import threading
 import time
 
-from .schema import RequestError, image_max_side, is_multimodal, parse_request
+from .schema import RequestError, image_max_side, is_multimodal, parse_state
 
 MAX_PERMUTATIONS = 8
 
@@ -27,11 +26,10 @@ MAX_PERMUTATIONS = 8
 class ModelService:
     """Il modello, le temperature e un lock che serializza l'uso della GPU."""
 
-    def __init__(self, scorer, temperatures=None, exit_temperatures=None, permutations: int = 2,
+    def __init__(self, scorer, temperatures=None, permutations: int = 2,
                  min_confidence: float | None = 0.5, image_max_side: int = 448, allow_paths: bool = False):
         self.scorer = scorer
         self.temperatures = temperatures or {}
-        self.exit_temperatures = exit_temperatures or {}
         self.permutations = permutations
         self.min_confidence = min_confidence
         self.image_max_side = image_max_side
@@ -50,16 +48,14 @@ class ModelService:
         """Decisione. Oltre ai campi di `/v1/systemone` accetta:
 
         - `"permutations": n` (1–8), per cambiare il numero di permutazioni delle opzioni;
-        - `"calibrated": false`, per avere le probabilità grezze anche con le temperature caricate;
-        - `"memories": ["...", ...]`, i ricordi (in testo) da mettere nel prompt.
+        - `"calibrated": false`, per avere le probabilità grezze anche con le temperature caricate.
 
         La calibrazione non si applica mai agli stati con immagini: le temperature sono fittate su testo.
         """
         if not isinstance(body, dict):
             raise RequestError("il body deve essere un oggetto JSON")
         if "memory" in body:
-            raise RequestError("la memoria sta nel server web (egeria serve): qui si passano solo "
-                               "i ricordi in testo, con 'memories'")
+            raise RequestError("la memoria sta nel server web (egeria serve): il server del modello non la consulta")
         permutations = body.get("permutations", self.permutations)
         if not isinstance(permutations, int) or isinstance(permutations, bool) or not 1 <= permutations <= MAX_PERMUTATIONS:
             raise RequestError(f"permutations deve essere un intero fra 1 e {MAX_PERMUTATIONS}")
@@ -72,9 +68,7 @@ class ModelService:
         body.setdefault("image_max_side", self.image_max_side)
         with self.lock:
             return self.scorer.decide(
-                body, permutations=permutations,
-                temperatures=self.temperatures if calibrated else {},
-                exit_temperatures=self.exit_temperatures if calibrated else {},
+                body, permutations=permutations, temperatures=self.temperatures if calibrated else {},
                 default_min_confidence=self.min_confidence,
             )
 
@@ -82,7 +76,7 @@ class ModelService:
         """Vettore semantico dello stato: `{"state": ..., "image_max_side": 448}`."""
         if not isinstance(body, dict):
             raise RequestError("il body deve essere un oggetto JSON")
-        state, _ = parse_request({"state": body.get("state"), "embed": True})
+        state = parse_state(body.get("state"))
         self.check_images(state)
         side = image_max_side({"image_max_side": body.get("image_max_side", self.image_max_side)})
         started = time.perf_counter()
@@ -138,8 +132,7 @@ def serve_model(args) -> int:
 
     scorer = DecisionScorer(args.model, device=args.device, dtype=args.dtype, quantize=args.quantize,
                             vision=not args.text_only)
-    temperatures, exit_temperatures = load_temperatures(args.temperatures)
-    service = ModelService(scorer, temperatures, exit_temperatures, permutations=args.permutations,
+    service = ModelService(scorer, load_temperatures(args.temperatures), permutations=args.permutations,
                            min_confidence=args.min_confidence, image_max_side=args.image_max_side,
                            allow_paths=args.allow_paths)
     info = {"model": args.model, "device": str(scorer.device), "vision": scorer.processor is not None,

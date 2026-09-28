@@ -242,8 +242,6 @@ def _one(question_body):
 
 
 def test_new_types_parse():
-    rank = _one({"type": "rank", "instructions": "x", "criteria": {"a": None, "b": None}})
-    assert rank.readout == "choice"
     number = _one({"type": "number", "instructions": "x", "criteria": {"bins": [0, 1, 3, None], "unit": "persone"}})
     assert number.keys == ["0-1", "1-3", ">=3"] and number.params["unit"] == "persone"
     assert number.options[2].description == "3 persone or more"
@@ -259,7 +257,9 @@ def test_new_types_parse():
         {"type": "number", "instructions": "x", "criteria": [0, None, 3]},  # null interno
         {"type": "open", "instructions": "x", "criteria": {"a": None}},
         {"type": "open", "instructions": "x", "top_k": 0},
-        {"type": "multi", "instructions": "x", "criteria": {"a": None, "b": None}},  # tipo rimosso
+        {"type": "multi", "instructions": "x", "criteria": {"a": None, "b": None}},  # tipi rimossi
+        {"type": "rank", "instructions": "x", "criteria": {"a": None, "b": None}},
+        {"type": "recall", "instructions": "x", "k": 2},
     ],
 )
 def test_new_types_validation(body):
@@ -267,19 +267,19 @@ def test_new_types_validation(body):
         parse_request({"state": "s", "questions": {"q": body}})
 
 
-def test_embed_only_request_needs_no_questions():
-    from egeria.schema import state_analysis
+def test_questions_required_and_state_validation():
+    from egeria.schema import parse_state
 
-    body = {"state": "s", "embed": True}
-    state, questions = parse_request(body)
-    assert questions == [] and state_analysis(body) == {"embed": True}
-    with pytest.raises(RequestError):
-        parse_request({"state": "s"})
+    for body in ({"state": "s"}, {"state": "s", "embed": True}, {"state": "s", "questions": {}}):
+        with pytest.raises(RequestError):
+            parse_request(body)
+    assert parse_state({"a": 1}) == {"a": 1}
+    for state in (None, "", 3, [{"type": "image"}], [{"type": "text", "text": "x"}, {"type": "image", "path": "a", "url": "b"}]):
+        with pytest.raises(RequestError):
+            parse_state(state)
 
 
-def test_rank_and_number_answers():
-    rank = _one({"type": "rank", "instructions": "x", "criteria": {"a": None, "b": None, "c": None}})
-    assert answer(rank, [0.2, 0.5, 0.3])["ranking"] == ["b", "c", "a"]
+def test_number_answers():
     number = _one({"type": "number", "instructions": "x", "criteria": [0, 10, 20]})
     result = answer(number, [0.5, 0.5])
     assert result["value"] == pytest.approx(10.0)  # media dei punti medi 5 e 15
@@ -311,22 +311,19 @@ def test_memory_store_search_save_load(tmp_path):
     assert store.search([1.0, 0.0, 0.0], k=3, min_similarity=0.5)[-1][1].id == "b"
     store.save(tmp_path / "m")
     again = MemoryStore.load(tmp_path / "m")
-    assert len(again) == 3 and again.items[1].note == "confermato"
-    assert "Decisions: q = y" in again.items[1].render() and "Note: confermato" in again.items[1].render()
+    assert len(again) == 3 and again.items[1].note == "confermato" and again.items[1].decisions == {"q": "y"}
     with pytest.raises(ValueError):
         store.add([0.0, 0.0, 1.0], Memory("a", "doppione"))
 
 
-def test_memory_block_in_prompt_and_options():
-    from egeria.prompt import build_messages
+def test_memory_options():
     from egeria.schema import memory_options
 
-    state, questions = parse_request(JEV_EXAMPLE)
-    content = build_messages(state, questions[0], [0, 1], memories=["State: vecchio caso\nDecisions: q = x"])[1]["content"]
-    assert content.index("<memories>") < content.index("<state>") and "[1]\nState: vecchio caso" in content
-    assert memory_options({"memory": {"recall": 3}}) == {"recall": 3, "min_similarity": None, "vote": True, "inject": False}
-    with pytest.raises(RequestError):
-        memory_options({"memory": {"recall": 50}})
+    assert memory_options({"memory": {"recall": 3}}) == {"recall": 3, "min_similarity": None, "vote": True}
+    assert memory_options({}) == {"recall": 0, "min_similarity": None, "vote": True}
+    for options in ({"recall": 50}, {"recall": 2, "vote": "sì"}, {"min_similarity": 2}):
+        with pytest.raises(RequestError):
+            memory_options({"memory": options})
 
 
 # --------------------------------------------------------------- immagini
@@ -384,18 +381,9 @@ def test_memory_votes_cover_only_known_questions():
     assert votes["frustration"]["support"] == 2
 
 
-def test_memory_render_hides_image_data():
-    from egeria.memory import Memory
+def test_describe_state_hides_image_data():
+    from egeria.memory import describe_state
 
-    memory = Memory("foto-1", [{"type": "text", "text": "Sinistro:"}, {"type": "image", "base64": "AAAA" * 1000}],
-                    {"danno": "moderato"})
-    rendered = memory.render()
-    assert "[image: base64]" in rendered and "AAAA" not in rendered
-    assert "[image: examples/x.jpg]" in Memory("f", [{"type": "image", "path": "examples/x.jpg"}]).render()
-
-
-def test_recall_question_parse():
-    q = _one({"type": "recall", "k": 5})
-    assert q.readout == "memory" and q.params == {"k": 5} and q.instructions
-    with pytest.raises(RequestError):
-        parse_request({"state": "s", "questions": {"q": {"type": "recall", "k": 0}}})
+    described = describe_state([{"type": "text", "text": "Sinistro:"}, {"type": "image", "base64": "AAAA" * 1000}])
+    assert "[image: base64]" in described and "AAAA" not in described
+    assert describe_state([{"type": "image", "path": "examples/x.jpg"}]) == "[image: examples/x.jpg]"

@@ -58,13 +58,13 @@ def fit_by_type(records: list[dict]) -> dict[str, float]:
     return temperatures
 
 
-def load_temperatures(path: str | Path | None) -> tuple[dict[str, float], dict[str, list[float]]]:
-    """Legge il file delle temperature: (finali per tipo, per tipo e layer di uscita)."""
+def load_temperatures(path: str | Path | None) -> dict[str, float]:
+    """Legge il file delle temperature: una per tipo di domanda.
+
+    I file vecchi possono avere anche "exits" (temperature per layer della profondità dinamica,
+    tolta il 29/09/2026): si ignora.
+    """
     if path is None:
-        return {}, {}
+        return {}
     data = json.loads(Path(path).read_text())
-    exits = {
-        key: [int(v) for v in values] if key == "layers" else [float(t) for t in values]
-        for key, values in data.get("exits", {}).items()
-    }
-    return {key: float(value) for key, value in data.items() if key != "exits"}, exits
+    return {key: float(value) for key, value in data.items() if key != "exits"}

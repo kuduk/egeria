@@ -6,7 +6,7 @@
 Questo server non carica il modello e non importa torch: chiama il server del modello via HTTP
 (`client.ModelClient`). Tiene lui lo storico (SQLite), le immagini caricate e i ricordi: cerca i
 ricordi con il vettore dello stato (`/v1/embed`), manda al modello solo le domande, aggiunge alla
-risposta il voto dei ricordi e le domande `recall`. Le immagini indicate con un percorso vengono
+risposta i ricordi simili e il voto dei ricordi. Le immagini indicate con un percorso vengono
 lette qui e inviate al modello in base64.
 """
 
@@ -25,7 +25,7 @@ import numpy as np
 
 from .client import ModelUnavailable
 from .memory import Memory, MemoryStore, apply_memory_context, describe_state, memory_context, needs_embedding
-from .schema import RequestError, is_multimodal, parse_request
+from .schema import RequestError, is_multimodal, parse_request, parse_state
 
 WEB_DIR = Path(__file__).parent / "web"
 PROJECT_ROOT = Path.cwd()
@@ -42,8 +42,6 @@ def answer_key(result: dict) -> str | None:
     if kind == "score":
         probabilities = result["probabilities"]
         return max(probabilities, key=probabilities.get)
-    if kind == "rank":
-        return result["ranking"][0]
     if kind == "number":
         return result["range"]
     if kind == "open":
@@ -188,23 +186,16 @@ class Engine:
         body.setdefault("image_max_side", self.image_max_side)
         store = self.memory if use_memory else None
         embedding = None
-        if needs_embedding(body, questions, store):
+        if needs_embedding(body, store):
             side = body["image_max_side"] if is_multimodal(state) else None
             embedding = self.client.embed(body["state"], side)
         with self.lock:
             context = memory_context(body, questions, store, embedding)
 
-        recalls = {q.id for q in questions if q.type == "recall"}
         model_body = {k: v for k, v in body.items() if k != "memory"}
-        model_body["questions"] = {qid: q for qid, q in body.get("questions", {}).items() if str(qid) not in recalls}
-        if context["prompt"]:
-            model_body["memories"] = context["prompt"]
         if not calibrated:
             model_body["calibrated"] = False
-        if model_body["questions"] or model_body.get("embed"):
-            response = self.client.decide(model_body)
-        else:  # solo domande recall: il modello non serve
-            response = {"answers": {}, "usage": {"input_tokens": 0, "output_tokens": 0}}
+        response = self.client.decide(model_body)
         return apply_memory_context(response, context, body, questions)
 
     # ----------------------------------------------------------------- media
@@ -286,7 +277,7 @@ def readable_labels(questions: dict) -> dict:
         criteria = question.get("criteria")
         if question.get("type") == "noul":
             labels[qid] = {"true": "Sì", "false": "No"}
-        elif isinstance(criteria, dict) and question.get("type") in ("choice", "rank"):
+        elif isinstance(criteria, dict) and question.get("type") == "choice":
             labels[qid] = {str(k): str(v or k) for k, v in criteria.items()}
         elif isinstance(criteria, list) and question.get("type") == "score":
             labels[qid] = {str(i): str(v) for i, v in enumerate(criteria)}
@@ -427,7 +418,7 @@ def create_app(engine: Engine, info: dict | None = None):
         state = payload.get("state")
         if state in (None, "", []):
             raise HTTPException(status_code=422, detail="serve lo stato")
-        guarded(parse_request, {"state": state, "embed": True})  # stessa validazione delle richieste
+        guarded(parse_state, state)  # stessa validazione delle richieste
         decisions = {str(k): str(v) for k, v in (payload.get("decisions") or {}).items()}
         memory_id = payload.get("id") or None
         if memory_id and engine.memory.get(memory_id) is not None:
@@ -441,7 +432,7 @@ def create_app(engine: Engine, info: dict | None = None):
         state = payload.get("state")
         if state in (None, "", []):
             raise HTTPException(status_code=422, detail="serve lo stato da cercare")
-        guarded(parse_request, {"state": state, "embed": True})
+        guarded(parse_state, state)
         found = guarded(engine.search, state, int(payload.get("k", 8)))
         return {"items": [memory_view(item, score) for score, item in found]}
 

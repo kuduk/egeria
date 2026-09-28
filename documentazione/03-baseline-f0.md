@@ -3,6 +3,8 @@
 # Baseline F0: readout zero-shot su Qwen3.5 e diagnostica della profondità dinamica
 
 > Stato: **implementata**. I risultati sono nella §6 e si aggiornano a ogni run.
+>
+> **Profondità dinamica tolta il 29/09/2026.** Letture intermedie, uscita anticipata e temperature per layer (§1 punto 6, §6.2, §6.4) non sono più nel codice. I risultati restano qui come riferimento. `min_confidence` è rimasto e marca le risposte incerte (`status`), calcolato sul modello completo.
 
 ## 1. Cosa fa
 
@@ -13,7 +15,7 @@ La F0 trasforma un Qwen3.5 **senza alcun training** in un modello decisionale co
 3. Si prende l'hidden state finale dell'ultima posizione e lo si moltiplica **solo per le righe dell'lm_head delle lettere**. La softmax è ristretta alle opzioni dichiarate.
 4. Con `--permutations P` ogni domanda viene valutata con P ordini diversi delle opzioni: rotazioni cicliche per `noul`/`choice`, ordine diretto e inverso per `score`. Le log-probabilità si mediano per opzione, così si riduce il bias di posizione.
 5. **Temperature scaling** per tipo di domanda, fittato su dati separati (il train split).
-6. **Readout intermedi** (opzionali). Gli hidden state all'uscita dei layer full-attention passano per la norm finale e per le righe delle lettere (logit lens). Servono a studiare la profondità dinamica per asserzione (vedi [02 §4bis](02-implicazioni-e-proposta.md)).
+6. **Readout intermedi** (tolti il 29/09/2026). Gli hidden state all'uscita dei layer full-attention passano per la norm finale e per le righe delle lettere (logit lens). Servono a studiare la profondità dinamica per asserzione (vedi [02 §4bis](02-implicazioni-e-proposta.md)).
 
 ## 2. Struttura del codice
 
@@ -21,11 +23,11 @@ La F0 trasforma un Qwen3.5 **senza alcun training** in un modello decisionale co
 |---|---|
 | [src/egeria/schema.py](../src/egeria/schema.py) | Validazione del body `/v1/systemone` (noul, choice fino a 26 opzioni, score da 2 a 10 livelli) |
 | [src/egeria/prompt.py](../src/egeria/prompt.py) | Prompt con opzioni a lettere e ordinamenti per le permutazioni |
-| [src/egeria/scorer.py](../src/egeria/scorer.py) | `DecisionScorer`: caricamento del modello (solo testo, niente torre visiva), forward batch con right padding, readout finale e intermedio, `decide()` in formato Jev |
+| [src/egeria/scorer.py](../src/egeria/scorer.py) | `DecisionScorer`: caricamento del modello (solo testo, niente torre visiva), forward batch con right padding, readout finale, `decide()` in formato Jev |
 | [src/egeria/confidence.py](../src/egeria/confidence.py) | Softmax con temperatura, formule di `confidence` di Jev, formato della risposta |
 | [src/egeria/calibration.py](../src/egeria/calibration.py) | Temperature scaling (ricerca della sezione aurea su 1/T, la NLL è convessa) |
 | [src/egeria/metrics.py](../src/egeria/metrics.py) | Accuratezza, NLL, KL, Brier, ECE, copertura al 5% d'errore, score MAE, flip rate |
-| [src/egeria/depth.py](../src/egeria/depth.py) | Temperature per (tipo, layer), qualità per layer, simulazione dell'early exit a soglia |
+| `depth.py` (tolto il 29/09/2026) | Temperature per (tipo, layer), qualità per layer, simulazione dell'early exit a soglia |
 | [src/egeria/datasets.py](../src/egeria/datasets.py) | Loader di `LocalLLaMA/typed-decisions` (il `--limit` campiona in modo equispaziato su tutti i workflow) |
 | [src/egeria/cli.py](../src/egeria/cli.py) | CLI `egeria` |
 | [scripts/baseline.sh](../scripts/baseline.sh) | Pipeline completa per uno o più modelli (ripartibile) |
@@ -89,14 +91,14 @@ Esempi pronti in [examples/](../examples/): `ticket_it.json` (ticket in italiano
 # Tabella di confronto fra modelli
 .venv/bin/egeria compare runs/*/report-cal.json
 
-# Predizioni su typed-decisions (con readout intermedi)
-.venv/bin/egeria predict --model Qwen/Qwen3.5-0.8B --split test --permutations 2 --exits blocks --out runs/x/test.jsonl
+# Predizioni su typed-decisions
+.venv/bin/egeria predict --model Qwen/Qwen3.5-0.8B --split test --permutations 2 --out runs/x/test.jsonl
 
-# Temperature fittate sul train (per tipo e per layer di uscita)
+# Temperature fittate sul train (una per tipo di domanda)
 .venv/bin/egeria calibrate --predictions runs/x/train.jsonl --out runs/x/temperature.json
 
-# Report, con analisi della profondità dinamica
-.venv/bin/egeria evaluate --predictions runs/x/test.jsonl --temperatures runs/x/temperature.json --depth
+# Report
+.venv/bin/egeria evaluate --predictions runs/x/test.jsonl --temperatures runs/x/temperature.json
 
 # Pipeline completa, staccata dalla sessione
 setsid nohup scripts/run_all.sh > runs/run_all.log 2>&1 &
@@ -216,6 +218,8 @@ Per NLL e Brier un valore negativo è meglio.
 5. **Le `score` restano deboli per tutti** (1–2 su 4): le scale ordinali sono la primitiva più difficile, come per Laya.
 
 ### 6.4 Profondità dinamica reale con `min_confidence` per asserzione
+
+> **Tolta il 29/09/2026.** Questa sezione descrive l'esecuzione blocco per blocco, che non è più nel codice. Oggi resta la parte sulla soglia: `min_confidence` con la stessa precedenza e la stessa scala descritte sotto, confrontata con la confidenza del modello completo. La risposta riporta `min_confidence` e `status`, non più `depth`.
 
 Oltre alla simulazione, lo scorer esegue davvero il modello **blocco per blocco** (`DecisionScorer.score_adaptive`):
 1. A ogni punto d'uscita calcola, per ogni domanda, la distribuzione combinata sulle permutazioni, calibrata con la temperatura di quel layer.

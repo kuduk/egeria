@@ -17,7 +17,7 @@
       "instructions": "C'è un incendio in corso?"
     },
     "azione": {
-      "type": "rank",
+      "type": "choice",
       "instructions": "Quale azione è più appropriata?",
       "criteria": {
         "chiamare_vigili": "Chiamare subito i vigili del fuoco",

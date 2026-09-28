@@ -66,14 +66,6 @@ def answer(question, probabilities) -> dict:
             "probabilities": rounded,
             "confidence": round(choice_confidence(p), 6),
         }
-    if question.type == "rank":
-        order = np.argsort(-p, kind="stable")
-        return {
-            "type": "rank",
-            "ranking": [keys[i] for i in order],
-            "probabilities": rounded,
-            "confidence": round(choice_confidence(p), 6),
-        }
     if question.type == "number":
         return number_answer(question, p)
     return {

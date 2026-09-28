@@ -20,11 +20,13 @@ Un modello di questo tipo:
 | Ricerca sullo stato dell'arte | Completata (settembre 2026) |
 | **F0** – baseline zero-shot (readout dei logit delle lettere, stile SemIf) + diagnostica della profondità dinamica per asserzione | Completata: harness pronto; zero-shot i modelli piccoli non battono la Prior; profondità dinamica con 27–36% di risparmio potenziale |
 | Stato con immagini (multimodale) | Integrato nell'API (`decide`) |
-| Primitive zero-shot `rank`, `number`, `open`, `embed` | Implementate e verificate (`multi` e `surprise` tolte: non superavano la prova) |
-| Memoria esterna (ricordi simili + voto dei ricordi in output), anche con immagini; domanda `recall` ("cosa ti ricorda?") | Implementata: voto dei ricordi 0.56 contro 0.47 del modello zero-shot; con le foto 5/6. `known` verificata e non tenuta |
+| Primitive zero-shot `number` e `open`, più il vettore dello stato (`/v1/embed`) | Implementate e verificate (`multi` e `surprise` tolte: non superavano la prova) |
+| Memoria esterna (ricordi simili + voto dei ricordi in output, `memory.recall`), anche con immagini | Implementata: voto dei ricordi 0.56 contro 0.47 del modello zero-shot; con le foto 5/6. `known` verificata e non tenuta |
 | Interfaccia web generica (`egeria serve`): chiedi su testo, immagini o dal vivo; storico; ricordi | Implementata e collaudata nel browser |
 | Modello separato dal server web (`egeria model-server`, API senza stato, token opzionale) | Implementato e collaudato |
-| F1 – LoRA + readout + teste di uscita, prima sui modelli piccoli (0.8B/2B) in locale | Prossimo passo |
+| Semplificazione: tolti profondità dinamica, `rank`, la domanda `recall`, `embed` dentro la richiesta, `inject` | Completata il 29/09/2026 |
+| **F0.5** – misurare e accelerare senza training: riuso dello stato, controlli senza etichette, calibrazione con spostamento, set di valutazione | Prossimo passo |
+| **F1** – primo LoRA su un compito con le immagini, in locale | Dopo F0.5 (roadmap in [02](documentazione/02-implicazioni-e-proposta.md) §6) |
 
 ## Avvio rapido
 
@@ -38,7 +40,7 @@ uv pip install --python .venv/bin/python -e ".[model,eval,dev]"   # + ",vision" 
 
 La richiesta ha lo stesso formato di una `POST /v1/systemone` di Jev (`state` + `questions`), e così la risposta. Esempi in [examples/](examples/).
 
-**Profondità dinamica per asserzione.** Estensione opzionale: `min_confidence` per domanda o globale nella richiesta; il valore locale sovrascrive il globale. Il modello esce al primo blocco che raggiunge la soglia e restituisce `depth` e `status` (`decided`/`uncertain`). Senza soglia usa il modello completo. Dettagli in [documentazione/03-baseline-f0.md](documentazione/03-baseline-f0.md) §6.4.
+**Soglia di confidenza per asserzione.** Estensione opzionale: `min_confidence` per domanda o globale nella richiesta; il valore locale sovrascrive il globale. Sotto la soglia la risposta ha `status: uncertain`, altrimenti `decided`. Fino al 29/09/2026 la stessa soglia faceva anche uscire il modello prima (profondità dinamica): tolta, perché zero-shot il guadagno reale era dello 0.5–4% ([documentazione/03-baseline-f0.md](documentazione/03-baseline-f0.md) §6).
 
 Per i kernel veloci dei layer Gated DeltaNet, la quantizzazione a 4 bit e la valutazione su typed-decisions vedi [documentazione/03-baseline-f0.md](documentazione/03-baseline-f0.md).
 
@@ -66,10 +68,10 @@ Dettagli in [documentazione/07-interfaccia.md](documentazione/07-interfaccia.md)
 | Documento | Contenuto |
 |---|---|
 | [documentazione/01-stato-dell-arte.md](documentazione/01-stato-dell-arte.md) | Survey: Jev, Laya, SemIf, repliche aperte su Qwen, benchmark, Qwen 3.8, tecniche di readout, calibrazione, paradigmi JEPA/LCM |
-| [documentazione/02-implicazioni-e-proposta.md](documentazione/02-implicazioni-e-proposta.md) | Decisioni prese, architettura proposta, profondità dinamica per asserzione, training, valutazione, roadmap, decisioni aperte |
+| [documentazione/02-implicazioni-e-proposta.md](documentazione/02-implicazioni-e-proposta.md) | Decisioni prese, architettura proposta, training, valutazione, limiti attuali, roadmap, decisioni aperte |
 | [documentazione/03-baseline-f0.md](documentazione/03-baseline-f0.md) | Baseline F0: codice, installazione (anche kernel veloci), uso, insidie verificate, risultati |
 | [documentazione/04-stato-con-immagini.md](documentazione/04-stato-con-immagini.md) | Stato con immagini: formato JSON, esempi, risultati (26/26 sui 2B), verso il tempo reale |
-| [documentazione/05-primitive-di-lettura.md](documentazione/05-primitive-di-lettura.md) | Primitive oltre noul/choice/score: verifica, **esempi d'uso** (rank, number, open, embed) e confronto con Jev e Laya |
+| [documentazione/05-primitive-di-lettura.md](documentazione/05-primitive-di-lettura.md) | Primitive oltre noul/choice/score: verifica, **esempi d'uso** (number, open, vettore dello stato) e confronto con Jev e Laya |
 | [documentazione/06-memoria.md](documentazione/06-memoria.md) | Memoria esterna: ricordi richiamati per somiglianza, voto dei ricordi, gestione dell'archivio |
 | [documentazione/07-interfaccia.md](documentazione/07-interfaccia.md) | Interfaccia web: avvio, architettura (modello e server web separati, API del modello, token), pagina Chiedi, dal vivo, storico, ricordi, impostazioni, API, collaudo |
 | [documentazione/fonti.md](documentazione/fonti.md) | Elenco delle fonti per area |
@@ -79,9 +81,9 @@ La documentazione è anche in inglese, in [documentazione/en/](documentazione/en
 ## Struttura
 
 ```
-src/egeria/     pacchetto: schema, prompt, scorer, calibrazione, metriche, profondità dinamica, memoria, server, CLI
+src/egeria/     pacchetto: schema, prompt, scorer, calibrazione, metriche, memoria, server, CLI
 src/egeria/web/ interfaccia web (HTML/CSS/JS statici); img/logo.png è il logo, le icone si ricavano con scripts/genera_icone.py
-scripts/        valutazioni (baseline.sh, run_all.sh, eval_memoria.sh, verifiche), collaudo dell'interfaccia, icone dal logo
+scripts/        valutazioni (baseline.sh, run_all.sh, verifiche), collaudo dell'interfaccia, icone dal logo
 tests/          test unitari (+ test d'integrazione col modello, opzionali)
 runs/           output dei run (predizioni, temperature, report); non versionato
 documentazione/ documentazione del progetto

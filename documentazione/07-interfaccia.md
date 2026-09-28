@@ -41,7 +41,7 @@ Poi, nel browser (anche da Windows, se il server gira in WSL): **http://localhos
 browser ──HTTP──▶ egeria serve (porta 8000)            ──HTTP──▶ egeria model-server (porta 8100)
                   interfaccia, storico (SQLite),                 Qwen3.5 sulla GPU, lock GPU
                   immagini caricate, ricordi,                    nessuno stato: niente storico,
-                  voto dei ricordi, domande recall               niente ricordi, niente file
+                  voto dei ricordi                               niente ricordi, niente file
 ```
 
 | | `egeria model-server` | `egeria serve` |
@@ -54,18 +54,16 @@ browser ──HTTP──▶ egeria serve (porta 8000)            ──HTTP─�
 
 **Come passa una domanda:**
 1. Il server web valida la richiesta e, se lo stato contiene immagini indicate con un percorso, le legge e le trasforma in base64. Accetta solo file dentro il progetto o dentro la cartella dei dati.
-2. Se servono i ricordi (`memory.recall` o domande `recall`) e l'archivio non è vuoto, chiede al modello il vettore dello stato (`POST /v1/embed`) e cerca i ricordi più simili.
-3. Manda al modello (`POST /v1/systemone`) la richiesta **senza** `memory` e **senza** le domande `recall`. Con `memory.inject` aggiunge i ricordi già in testo (`"memories": [...]`).
-4. Alla risposta del modello aggiunge il voto dei ricordi (`answers[q].memory`), le risposte `recall` e i ricordi richiamati (`memories`), nell'ordine delle domande della richiesta.
-
-Con sole domande `recall` il modello risponde solo al vettore: la decisione non viene chiamata.
+2. Se servono i ricordi (`memory.recall` > 0) e l'archivio non è vuoto, chiede al modello il vettore dello stato (`POST /v1/embed`) e cerca i ricordi più simili.
+3. Manda al modello (`POST /v1/systemone`) la richiesta **senza** `memory`: al modello arrivano solo stato e domande.
+4. Alla risposta del modello aggiunge il voto dei ricordi (`answers[q].memory`) e i ricordi richiamati (`memories`).
 
 ### API del server del modello
 
 | Metodo e percorso | Body | Risposta |
 |---|---|---|
 | `GET /v1/info` | | modello, dispositivo, GPU, parte visiva, permutazioni, soglia di default, calibrazione |
-| `POST /v1/systemone` | body Jev (`state`, `questions`, `min_confidence`, `image_max_side`, `embed`) più `permutations` (1–8), `calibrated` (`false` = probabilità grezze), `memories` (fino a 10 testi da mettere nel prompt) | risposta Jev con le estensioni Egeria |
+| `POST /v1/systemone` | body Jev (`state`, `questions`, `min_confidence`, `image_max_side`) più `permutations` (1–8) e `calibrated` (`false` = probabilità grezze) | risposta Jev con le estensioni Egeria |
 | `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (normalizzato L2), `embedding_dim`, `input_tokens`, `latency_ms` |
 
 Esempio, direttamente sul server del modello:
@@ -176,7 +174,7 @@ Le impostazioni restano nel browser.
 
 | Metodo e percorso | Uso |
 |---|---|
-| `POST /v1/systemone` | API compatibile Jev, con le estensioni Egeria **e i ricordi** (`memory.recall`, `vote`, `inject`, domande `recall`) |
+| `POST /v1/systemone` | API compatibile Jev, con le estensioni Egeria **e i ricordi** (`memory.recall`, `memory.min_similarity`, `memory.vote`) |
 | `GET /api/info` | modello e stato del server del modello (`model_status`: `ok` o `non_raggiungibile`), numero di ricordi e di analisi |
 | `GET /api/cases?view=da_rivedere\|tutti` | storico |
 | `POST /api/cases` | `{"request": <body /v1/systemone>}`: analizza e salva nello storico |
@@ -206,7 +204,7 @@ Prove a mano sul percorso completo:
 - foto indicata con un percorso: arriva al modello in base64; il ricordo salvato viene richiamato con similarità 1.0 e vota la risposta;
 - stessa foto mandata con il percorso direttamente al server del modello: rifiutata con `422`.
 
-I test automatici ([tests/test_server.py](../tests/test_server.py)) fanno parlare il client HTTP vero con il server del modello in-process. Coprono token, percorsi rifiutati, calibrazione mai applicata alle immagini, ricordi e recall calcolati dal server web, immagini in base64, modello non raggiungibile (`503`).
+I test automatici ([tests/test_server.py](../tests/test_server.py)) fanno parlare il client HTTP vero con il server del modello in-process. Coprono token, percorsi rifiutati, calibrazione mai applicata alle immagini, ricordi e voto calcolati dal server web, immagini in base64, modello non raggiungibile (`503`).
 
 **Bug trovati e corretti con il collaudo:**
 - barre di probabilità vuote (elemento inline senza `display: block`);

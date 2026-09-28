@@ -2,17 +2,17 @@
 
 # Memoria: ricordi richiamati per somiglianza
 
-> Stato: **implementata**, per testo e **immagini**. Il **recupero** funziona: il voto dei ricordi vale 0.56 contro 0.47 del modello zero-shot (testo), e con le foto il ricordo più simile è della categoria giusta in 5 casi su 6 (§6). Mettere i ricordi **nel prompt** zero-shot non migliora le decisioni, quindi è un'opzione spenta di default (`inject`).
+> Stato: **implementata**, per testo e **immagini**. Il **recupero** funziona: il voto dei ricordi vale 0.56 contro 0.47 del modello zero-shot (testo), e con le foto il ricordo più simile è della categoria giusta in 5 casi su 6 (§6). Mettere i ricordi **nel prompt** zero-shot non migliorava le decisioni: l'opzione `inject` è stata tolta il 29/09/2026.
 
 ## 1. Idea
 
 La memoria è **un oggetto esterno al modello**: un archivio di casi passati con le decisioni prese (meglio se confermate da un esito o da una correzione), note e regole. Si aggiunge, si ispeziona e si cancella **senza riaddestrare nulla**.
 
-Davanti a uno stato nuovo si recuperano i ricordi più simili tramite l'`embed` dello stato, gratuito nello stesso modello, e si restituiscono in output. Per ogni domanda che i ricordi coprono si restituisce anche il **voto dei ricordi**.
+Davanti a uno stato nuovo si recuperano i ricordi più simili tramite il vettore dello stato, calcolato dallo stesso modello, e si restituiscono in output. Per ogni domanda che i ricordi coprono si restituisce anche il **voto dei ricordi**.
 
 ## 2. Il recupero funziona?
 
-**Prova minima** (6 frasi): l'hidden dell'ultimo token è anisotropo, con coseno 0.91–0.97 per qualsiasi coppia. La **media sui token dello stato** separa molto meglio, quindi `embed` usa la media.
+**Prova minima** (6 frasi): l'hidden dell'ultimo token è anisotropo, con coseno 0.91–0.97 per qualsiasi coppia. La **media sui token dello stato** separa molto meglio, quindi il vettore dello stato usa la media.
 
 **Prova sulle decisioni** (typed-decisions): per ogni caso di test si recuperano i 10 casi di train più simili e si predice con le loro decisioni.
 
@@ -49,7 +49,7 @@ Esperimento: 2B-Base, 3 ricordi con le decisioni gold nel prompt prima dello sta
 
 **Conclusione.** Su decisioni ripetitive come queste, i casi simili già decisi valgono più del modello zero-shot, e il 2B non sa ancora sfruttarli nel contesto. Per questo:
 - di default la memoria **restituisce** i ricordi e il loro voto;
-- l'iniezione nel prompt è opzionale (`"inject": true`) ed è da riprovare dopo il training (F1), insegnando al modello a usare i ricordi.
+- l'iniezione nel prompt (`inject`) è stata tolta il 29/09/2026. Si potrà riprovare dopo il training, insegnando al modello a usare i ricordi.
 
 ## 4. API
 
@@ -69,7 +69,6 @@ Esperimento: 2B-Base, 3 ricordi con le decisioni gold nel prompt prima dello sta
 - `recall` (0–10): quanti ricordi restituire.
 - `min_similarity`: soglia di similarità.
 - `vote` (default `true`): voto per ogni domanda coperta. Usa i 10 ricordi più simili che hanno quella domanda, pesati con softmax(similarità / 0.05), più una smussatura del 10%.
-- `inject` (default `false`): mette i ricordi anche nel prompt.
 
 **Risposta reale** (2B-Base; archivio di prova con 3 ricordi, [examples/memoria_ticket.json](../examples/memoria_ticket.json)):
 
@@ -111,7 +110,7 @@ L'archivio è una cartella con `memories.jsonl` (ricordi leggibili) e `vectors.n
 
 **Cosa salvare.** Solo decisioni **confermate** (esiti, correzioni umane). Salvare le risposte del modello senza verifica ne rinforzerebbe gli errori; per questo `decide` non scrive mai nella memoria.
 
-**Valutazione riproducibile:** `scripts/eval_memoria.sh` (ricordi nel prompt, con `--inject`).
+**Valutazione dei ricordi nel prompt:** lo script `scripts/eval_memoria.sh` (con `--inject`) è stato tolto il 29/09/2026 insieme a `inject`. I numeri della §3 restano come riferimento.
 
 ## 6. Memoria con le immagini
 
@@ -145,22 +144,22 @@ Nelle richieste si usa lo stesso `image_max_side` con cui si sono archiviate le 
 - **Il modello, interrogato direttamente, riconosce correttamente tutte e 6 le foto.** Il disaccordo fra voto dei ricordi e risposta del modello è quindi il segnale per fermarsi e chiedere a un umano.
 - **Con archivi più ricchi** (più esempi per categoria, da fonti diverse) l'effetto dell'aspetto visivo si diluisce.
 
-**Limiti:**
-- con le immagini `open` non è ancora supportata;
-- `inject` mostra le immagini dei ricordi solo come riferimento testuale (`[image: percorso]`), non le rimette nel prompt.
+**Limite:** nell'archivio le immagini dei ricordi si vedono solo come riferimento (`[image: percorso]`): i dati dell'immagine non vengono copiati.
 
 ## 7. Domande sulla memoria
 
-### `recall`: "cosa ti ricorda?" (tenuta)
+### "Cosa ti ricorda?": i ricordi simili (tenuta)
 
-È una domanda come le altre: restituisce i ricordi più simili allo stato, con similarità, decisioni e note. Il recupero è quello verificato (§2 e §6). `instructions` è facoltativa, perché il recupero usa lo stato e non il testo della domanda; `k` va da 1 a 10.
+Si chiede con `"memory": {"recall": k}` nella richiesta (k da 1 a 10): la risposta riporta in `memories` i ricordi più simili allo stato, con similarità, decisioni e note, e per le domande che coprono il voto dei ricordi. Il recupero è quello verificato (§2 e §6). Nell'interfaccia la stessa cosa si fa dalla pagina *Ricordi* ("Memories"), con *Cerca* o *Cerca con un'immagine*.
+
+Fino al 29/09/2026 esisteva anche una domanda di tipo `recall` che restituiva la stessa lista: è stata tolta perché duplicava `memory.recall`.
 
 ```json
 {
   "state": [{"type": "text", "text": "Immagine ricevuta:"}, {"type": "image", "path": "examples/immagini/nuove/incendio2.jpg"}],
   "image_max_side": 448,
+  "memory": {"recall": 2},
   "questions": {
-    "ricorda": {"type": "recall", "instructions": "Cosa ti ricorda questa immagine?", "k": 2},
     "azione": {"type": "choice", "instructions": "Quale azione è appropriata?",
                "criteria": {"chiamare_vigili": "Chiamare i vigili del fuoco", "aprire_sinistro": "Aprire una pratica di sinistro", "nessuna": "Nessuna azione"}}
   }
@@ -174,13 +173,17 @@ Nelle richieste si usa lo stesso `image_max_side` con cui si sono archiviate le 
 Risposta reale: archivio di 4 foto con note ([examples/memoria_ricorda.json](../examples/memoria_ricorda.json)), interrogato con una foto **nuova** di un altro incendio.
 
 ```json
-"ricorda": {"type": "recall", "memories": [
+"answers": {
+  "azione": {"type": "choice", "choice": "chiamare_vigili",
+    "probabilities": {"chiamare_vigili": 0.857, "aprire_sinistro": 0.050, "nessuna": 0.093}, "confidence": 0.786,
+    "memory": {"answer": "chiamare_vigili",
+               "probabilities": {"chiamare_vigili": 0.694, "aprire_sinistro": 0.230, "nessuna": 0.076}, "support": 4}}
+},
+"memories": [
   {"id": "foto-incendio-0812", "similarity": 0.8591, "decisions": {"azione": "chiamare_vigili"},
    "note": "Incendio in via Verdi, 12 agosto: vigili arrivati in 9 minuti"},
   {"id": "foto-sinistro-2026-0913", "similarity": 0.7985, "decisions": {"azione": "aprire_sinistro"},
-   "note": "Urto contro palo, pratica 2026-0913 liquidata"}]},
-"azione": {"type": "choice", "choice": "chiamare_vigili",
-  "probabilities": {"chiamare_vigili": 0.857, "aprire_sinistro": 0.050, "nessuna": 0.093}, "confidence": 0.786}
+   "note": "Urto contro palo, pratica 2026-0913 liquidata"}]
 ```
 
 ### `known`: "è qualcosa che hai in memoria?" (non tenuta)
@@ -196,22 +199,24 @@ La misura relativa all'archivio (percentile rispetto ai vicini interni) non fa m
 - **testo, stesso contro simile:** i casi di typed-decisions sono generati da modelli di testo e si somigliano quasi quanto le copie modificate;
 - **immagini, simile contro nuovo:** tornano gli errori dovuti all'aspetto visivo (lo screenshot di phishing somiglia a uno scontrino; la rastrelliera colorata a 0.83).
 
-**Cosa resta utilizzabile, con cautela.** `recall` restituisce le similarità, e dalla verifica emergono due regole pratiche:
+**Cosa resta utilizzabile, con cautela.** `memory.recall` restituisce le similarità, e dalla verifica emergono due regole pratiche:
 - **testo:** similarità del ricordo più vicino sotto ~0.6 → argomento assente dalla memoria (qui fra 0.29 e 0.90 non c'era nulla);
 - **immagini:** similarità ≥ ~0.94 → con ogni probabilità è la stessa foto, anche ritagliata (qui fra 0.908 e 0.956).
 
 Sono soglie misurate su pochi casi e su questi archivi. Dipendono dal modello, da `image_max_side` e, sopra i 20 ricordi, dalla centratura. Per i duplicati esatti di testo basta un confronto dell'hash del testo normalizzato.
 
-### Perché `known` fallisce e come può rientrare
+### Perché `known` fallisce, e cosa resta
 
-**La causa comune: `recall` ordina, `known` usa una soglia.** `recall` deve solo ordinare i ricordi, e l'ordine resta giusto anche con similarità "schiacciate". `known` richiede una soglia assoluta, ma la scala delle similarità dipende da modello, tipo di dato, risoluzione e dimensione dell'archivio (centratura oltre i 20 ricordi).
+> **Abbandonata il 29/09/2026**, anche come obiettivo del training. Le idee qui sotto restano come traccia; per "questo caso è fuori da ciò che conosco?" restano la misura della calibrazione fuori dominio (F0.5 in [02-implicazioni-e-proposta.md](02-implicazioni-e-proposta.md) §6) e `memory.min_similarity`.
+
+**La causa comune: il richiamo ordina, `known` usa una soglia.** Il richiamo (`memory.recall`) deve solo ordinare i ricordi, e l'ordine resta giusto anche con similarità "schiacciate". `known` richiede una soglia assoluta, ma la scala delle similarità dipende da modello, tipo di dato, risoluzione e dimensione dell'archivio (centratura oltre i 20 ricordi).
 
 **Testo, stesso contro simile.** Il vettore è una media su tutto lo stato: rappresenta *che tipo di cosa* è lo stato, non *quale istanza*. Casi diversi dello stesso flusso (stessa struttura, pochi valori diversi) hanno similarità 0.90–0.996; le copie modificate 0.95–0.996.
 
 **Immagini, simile contro nuovo.** I token visivi dominano la media, quindi il vettore cattura soprattutto l'aspetto (colori, composizione, "foglio con testo"). Il modello, interrogato direttamente, riconosce invece tutte e 6 le categorie: il significato c'è, ma non emerge nella media.
 
-**Come può rientrare:**
+**Come avrebbe potuto rientrare:**
 1. **Senza training: recupero + verifica.** Il recupero trova il candidato; una `noul` con entrambi gli stati nel prompt chiede "è lo stesso caso?" / "è lo stesso tipo di situazione?". Da verificare con le stesse soglie.
 2. **F1, loss propria su coppie** (l'equivalente supervisionato di RLCD). Rende calibrata la probabilità di quella `noul`. Coppie costruibili: copie modificate e ritagli (stesso), casi diversi dello stesso flusso o categoria (simile), temi e categorie assenti (nuovo).
-3. **F1, embedding contrastivo con LoRA.** Avvicina i vettori dello stesso tipo e allontana gli altri, con esempi difficili (screenshot contro scontrino). Migliora anche `recall` e il voto dei ricordi.
+3. **F1, embedding contrastivo con LoRA.** Avvicina i vettori dello stesso tipo e allontana gli altri, con esempi difficili (screenshot contro scontrino). Migliora anche il richiamo e il voto dei ricordi.
 4. **Stesso caso nel testo:** controllo sul contenuto (hash del testo normalizzato, MinHash/Jaccard, campi identificativi), più affidabile di qualsiasi vettore semantico.
