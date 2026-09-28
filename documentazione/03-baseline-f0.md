@@ -1,3 +1,5 @@
+**Italiano** · [English](en/03-baseline-f0.md)
+
 # Baseline F0: readout zero-shot su Qwen3.5 e diagnostica della profondità dinamica
 
 > Stato: **implementata**. I risultati sono nella §6 e si aggiornano a ogni run.

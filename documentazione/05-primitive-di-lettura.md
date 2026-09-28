@@ -1,3 +1,5 @@
+**Italiano** · [English](en/05-reading-primitives.md)
+
 # Primitive di lettura oltre noul, choice e score
 
 > Stato: implementate e **verificate** `rank`, `number`, `open` ed `embed` (§4). **Tolte** perché non hanno superato la prova: `multi` (bias verso il "sì", tornerà con il training F1) e `surprise` (AUROC 0.50). Quelle con training (`span`, `locate`, `value`, `tags`, `why`) sono da fare. Esempi d'uso nella §5.
@@ -84,7 +86,7 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 - solo il testo casuale e le parole mescolate risultano "sorprendenti".
 
 **Limiti noti delle primitive tenute:**
-- `open` risponde con una sola "parola" o un valore. La probabilità riguarda il primo token; il completamento prosegue fino al primo spazio (entro 16 token), così date, importi e codici escono interi ("gg.mm.aaaa", "14,21"). Funziona anche con le immagini ([04-stato-con-immagini.md](04-stato-con-immagini.md) §7).
+- `open` risponde con una sola "parola" o un valore. La probabilità riguarda il primo token; il completamento prosegue fino al primo spazio (entro 16 token), così date, importi e codici escono interi (una data completa nel formato "gg.mm.aaaa", l'importo "14,21"). Funziona anche con le immagini ([04-stato-con-immagini.md](04-stato-con-immagini.md) §7).
 - `embed` costa un passaggio in più sullo stato.
 
 ## 5. Esempi d'uso

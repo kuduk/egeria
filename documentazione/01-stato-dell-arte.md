@@ -1,3 +1,5 @@
+**Italiano** · [English](en/01-state-of-the-art.md)
+
 # Stato dell'arte: modelli decisionali semantici "System 1"
 
 > Ricerca aggiornata al **26 settembre 2026**. La categoria è nata a metà settembre 2026: quasi tutti i numeri sono dichiarati dai vendor o da leaderboard della community vecchie di pochi giorni.
@@ -267,7 +269,7 @@ Letti il runtime TypeScript ([receptron/laya](https://github.com/receptron/laya)
   | `score:3-5` | 1.25 |
 
   Non c'è un termine di spostamento: un'inclinazione sistematica verso una risposta (per esempio il "Sì") non si corregge in inferenza, solo con il training.
-- **La testa `act` ("agire o passare la mano") non funziona:** vale ~1.0 quasi sempre, e ha AUROC 0.30 contro la correttezza (issue #185). La confidenza invece arriva a 0.77. Per decidere quando fidarsi basta la confidenza, se una testa dedicata non viene addestrata con un obiettivo proprio.
+- **La testa `act` ("agire o passare la mano") non funziona:** vale ~1.0 quasi sempre, e ha AUROC 0.30 contro la correttezza (issue #185). La confidenza invece arriva a un AUROC di 0.77. Per decidere quando fidarsi basta la confidenza, se una testa dedicata non viene addestrata con un obiettivo proprio.
 
 **Training (RLCD in pratica).**
 - **Obiettivi:** le distribuzioni del teacher (soft), non etichette secche.

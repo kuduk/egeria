@@ -1,3 +1,5 @@
+**Italiano** · [English](en/02-implications-and-proposal.md)
+
 # Implicazioni per Egeria e proposta di partenza
 
 > Questo documento traduce lo [stato dell'arte](01-stato-dell-arte.md) in una proposta concreta. Le decisioni ancora aperte sono in fondo (§7).

@@ -1,3 +1,5 @@
+**Italiano** · [English](en/07-web-interface.md)
+
 # Interfaccia web
 
 > Stato: **implementata e collaudata** in un browser headless ([scripts/collaudo_ui.py](../scripts/collaudo_ui.py)). Seconda versione: la prima (console, monitor e memoria separati, domande in JSON, modelli di domande specifici) era difficile da usare ed è stata sostituita.
@@ -216,7 +218,7 @@ I test automatici ([tests/test_server.py](../tests/test_server.py)) fanno parlar
 - **Nessuna build:** HTML, CSS e JS statici serviti da FastAPI. Il DOM si costruisce solo con `textContent` (niente XSS).
 - **Stile:** tema scuro o chiaro, Fira Sans/Fira Code, icone SVG.
   - **Logo:** [img/logo.png](../src/egeria/web/img/logo.png). Nella barra in alto c'è l'emblema su un riquadro chiaro arrotondato, uguale nei due temi, accanto al nome in maiuscolo spaziato come nella scritta del logo. Il riquadro chiaro serve perché il volto è disegnato con il bianco del fondo: su uno sfondo scuro l'emblema diventerebbe un negativo.
-  - **Icone derivate:** emblema, favicon e icona per iPhone si generano con `.venv/bin/python scripts/genera_icone.py`, da rilanciare se cambia il logo.
+  - **Immagini derivate:** emblema, favicon, icona per iPhone e le due anteprime social 1280×640 per GitHub (logo centrato, oppure emblema e scritta affiancati) si generano con `.venv/bin/python scripts/genera_icone.py`, da rilanciare se cambia il logo.
   - Colori di stato sempre affiancati da testo e icona: ambra = non sono sicuro, viola = diverso dai ricordi, rosso = avviso.
   - Focus visibile e `prefers-reduced-motion` rispettato.
 - **Modello separato dall'interfaccia** (§1bis): un solo modello caricato nel `model-server`, con un lock sulla GPU; il server web non importa torch. Entrambi ascoltano solo su `127.0.0.1` di default, e `/files` serve solo immagini dentro il progetto.

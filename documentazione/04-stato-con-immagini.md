@@ -1,3 +1,5 @@
+**Italiano** · [English](en/04-image-states.md)
+
 # Stato con immagini
 
 > Stato: **integrato nell'API** (`egeria decide` con lo stato come lista di parti testo/immagine, §6). **26/26** sui 2B nella suite di prova, anche su foto reali ([scripts/demo_immagini.py](../scripts/demo_immagini.py)).

@@ -1,3 +1,5 @@
+**Italiano** · [English](en/sources.md)
+
 # Fonti
 
 Fonti consultate per [01-stato-dell-arte.md](01-stato-dell-arte.md), con accesso tra il 25 e il 26/09/2026.

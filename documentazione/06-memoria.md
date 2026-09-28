@@ -1,3 +1,5 @@
+**Italiano** · [English](en/06-memory.md)
+
 # Memoria: ricordi richiamati per somiglianza
 
 > Stato: **implementata**, per testo e **immagini**. Il **recupero** funziona: il voto dei ricordi vale 0.56 contro 0.47 del modello zero-shot (testo), e con le foto il ricordo più simile è della categoria giusta in 5 casi su 6 (§6). Mettere i ricordi **nel prompt** zero-shot non migliora le decisioni, quindi è un'opzione spenta di default (`inject`).

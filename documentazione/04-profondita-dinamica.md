@@ -1,3 +1,5 @@
+**Italiano** · [English](en/04-dynamic-depth.md)
+
 # Profondità dinamica per asserzione
 
 > **Proposta.** Ogni asserzione (domanda) usa solo la profondità di calcolo che le serve. Le decisioni facili escono presto, quelle incerte proseguono.
