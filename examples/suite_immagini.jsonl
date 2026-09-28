@@ -1,0 +1,26 @@
+{"image": "examples/immagini/cerchio_rosso.png", "question": "Che forma è mostrata?", "options": ["cerchio", "quadrato", "triangolo"], "expected": "cerchio"}
+{"image": "examples/immagini/cerchio_rosso.png", "question": "Di che colore è la forma?", "options": ["rossa", "verde", "blu"], "expected": "rossa"}
+{"image": "examples/immagini/pericolo.png", "question": "L'immagine contiene un avviso di pericolo?", "options": ["sì", "no"], "expected": "sì"}
+{"image": "examples/immagini/fattura.png", "question": "L'importo della fattura corrisponde a quello dell'ordine?", "options": ["sì, corrisponde", "no, è diverso"], "expected": "no, è diverso"}
+{"image": "examples/immagini/fattura.png", "question": "Qual è il totale della fattura?", "options": ["1.800,00 EUR", "2.300,00 EUR", "15,00 EUR"], "expected": "2.300,00 EUR"}
+{"image": "examples/immagini/fattura.png", "question": "Chi è il fornitore?", "options": ["Bianchi spa", "Rossi Forniture srl", "Verdi snc"], "expected": "Rossi Forniture srl"}
+{"image": "examples/immagini/scontrino.jpg", "question": "Qual è il totale dello scontrino?", "options": ["3,99", "14,21", "1,17", "26,01"], "expected": "14,21"}
+{"image": "examples/immagini/scontrino.jpg", "question": "Come è stato pagato?", "options": ["in contanti", "con carta/bancomat (PIN)", "con bonifico"], "expected": "con carta/bancomat (PIN)"}
+{"image": "examples/immagini/scontrino.jpg", "question": "Che tipo di negozio ha emesso lo scontrino?", "options": ["supermercato", "ristorante", "farmacia", "distributore di benzina"], "expected": "supermercato"}
+{"image": "examples/immagini/scontrino.jpg", "question": "In quale città si trova il negozio?", "options": ["Amsterdam", "Rotterdam", "Milano", "Utrecht"], "expected": "Rotterdam"}
+{"image": "examples/immagini/scontrino.jpg", "question": "La spesa supera i 50 euro?", "options": ["sì", "no"], "expected": "no"}
+{"image": "examples/immagini/email_phishing.png", "question": "Qual è l'oggetto dell'email?", "options": ["Action Required: Notice Regarding Your Domain Name(s)", "Your order has shipped", "Meeting tomorrow at 10", "Invoice overdue"], "expected": "Action Required: Notice Regarding Your Domain Name(s)"}
+{"image": "examples/immagini/email_phishing.png", "question": "L'email chiede di cliccare un link per verificare o aggiornare dei dati?", "options": ["sì", "no"], "expected": "sì"}
+{"image": "examples/immagini/email_phishing.png", "question": "Che cosa mostra l'immagine?", "options": ["un'email in una casella di posta web", "una fattura cartacea", "un profilo di social network", "un documento d'identità"], "expected": "un'email in una casella di posta web"}
+{"image": "examples/immagini/incidente_auto.jpg", "question": "Il veicolo nell'immagine è danneggiato?", "options": ["sì", "no"], "expected": "sì"}
+{"image": "examples/immagini/incidente_auto.jpg", "question": "Che tipo di incidente mostra l'immagine?", "options": ["urto contro un ostacolo fisso", "ribaltamento del veicolo", "incendio del veicolo", "nessun incidente"], "expected": "urto contro un ostacolo fisso"}
+{"image": "examples/immagini/incidente_auto.jpg", "question": "Di che colore è l'auto coinvolta?", "options": ["bianca", "rossa", "nera", "blu"], "expected": "bianca"}
+{"image": "examples/immagini/stop_italia.jpg", "question": "Quale segnale stradale è visibile?", "options": ["stop", "divieto di sosta", "dare precedenza", "limite di velocità"], "expected": "stop"}
+{"image": "examples/immagini/stop_italia.jpg", "question": "Qual è il nome della via sul cartello?", "options": ["via XXV Aprile", "via Roma", "via Garibaldi", "corso Italia"], "expected": "via XXV Aprile"}
+{"image": "examples/immagini/stop_italia.jpg", "question": "Il segnale obbliga a fermarsi?", "options": ["sì", "no"], "expected": "sì"}
+{"image": "examples/immagini/casa_incendio.jpg", "question": "C'è un incendio in corso?", "options": ["sì", "no"], "expected": "sì"}
+{"image": "examples/immagini/casa_incendio.jpg", "question": "Quale azione è più appropriata?", "options": ["nessuna azione", "monitorare la situazione", "chiamare subito i vigili del fuoco"], "expected": "chiamare subito i vigili del fuoco"}
+{"image": "examples/immagini/casa_incendio.jpg", "question": "Quanto è grave la situazione? (scala crescente)", "options": ["nessun pericolo", "bassa", "media", "alta"], "expected": "alta"}
+{"image": "examples/immagini/gatto.jpg", "question": "C'è una situazione di pericolo nell'immagine?", "options": ["sì", "no"], "expected": "no"}
+{"image": "examples/immagini/gatto.jpg", "question": "Quale animale è presente?", "options": ["gatto", "cane", "coniglio", "nessun animale"], "expected": "gatto"}
+{"image": "examples/immagini/gatto.jpg", "question": "Quale azione è più appropriata?", "options": ["nessuna azione", "monitorare la situazione", "chiamare subito i vigili del fuoco"], "expected": "nessuna azione"}

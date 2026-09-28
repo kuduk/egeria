@@ -1,0 +1,24 @@
+{
+  "state": "Buongiorno, sono tre giorni che i pagamenti ai nostri fornitori falliscono con l'errore 'IBAN non valido', ma l'IBAN è corretto e fino alla settimana scorsa funzionava. Abbiamo stipendi da pagare venerdì. Se non risolvete entro domani passiamo a un altro fornitore.",
+  "questions": {
+    "urgente": {
+      "type": "noul",
+      "instructions": "Il cliente esprime urgenza?",
+      "criteria": {"true": "C'è una scadenza o una pressione temporale esplicita", "false": "Nessuna urgenza espressa"}
+    },
+    "reparto": {
+      "type": "choice",
+      "instructions": "Quale reparto deve gestire il ticket?",
+      "criteria": {
+        "pagamenti": "Pagamenti, bonifici, fatturazione, rimborsi",
+        "tecnico": "Bug, malfunzionamenti, integrazioni",
+        "commerciale": "Prezzi, contratti, nuovi clienti"
+      }
+    },
+    "rischio_abbandono": {
+      "type": "score",
+      "instructions": "Quanto è alto il rischio che il cliente abbandoni il servizio?",
+      "criteria": ["Nessun rischio", "Basso", "Medio", "Alto"]
+    }
+  }
+}

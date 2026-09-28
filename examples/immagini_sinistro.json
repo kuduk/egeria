@@ -1,0 +1,39 @@
+{
+  "state": [
+    {
+      "type": "text",
+      "text": "Foto allegata dal cliente alla denuncia di sinistro n. 2026-0913:"
+    },
+    {
+      "type": "image",
+      "path": "examples/immagini/incidente_auto.jpg"
+    }
+  ],
+  "image_max_side": 448,
+  "questions": {
+    "danneggiato": {
+      "type": "noul",
+      "instructions": "Il veicolo nella foto è danneggiato?"
+    },
+    "dinamica": {
+      "type": "choice",
+      "instructions": "Che tipo di incidente mostra la foto?",
+      "criteria": {
+        "urto_ostacolo": "Urto contro un ostacolo fisso",
+        "tamponamento": "Tamponamento fra veicoli",
+        "ribaltamento": "Ribaltamento del veicolo",
+        "nessun_incidente": "Nessun incidente visibile"
+      }
+    },
+    "gravita": {
+      "type": "score",
+      "instructions": "Quanto è grave il danno visibile?",
+      "criteria": [
+        "Nessun danno",
+        "Lieve (graffi)",
+        "Moderato (carrozzeria deformata)",
+        "Grave (veicolo distrutto)"
+      ]
+    }
+  }
+}

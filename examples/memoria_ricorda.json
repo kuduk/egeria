@@ -1,0 +1,10 @@
+{
+  "state": [{"type": "text", "text": "Immagine ricevuta:"}, {"type": "image", "path": "examples/immagini/nuove/incendio2.jpg"}],
+  "image_max_side": 448,
+  "questions": {
+    "ricorda": {"type": "recall", "instructions": "Cosa ti ricorda questa immagine?", "k": 2},
+    "azione": {"type": "choice", "instructions": "Quale azione è appropriata?",
+               "criteria": {"chiamare_vigili": "Chiamare i vigili del fuoco", "aprire_sinistro": "Aprire una pratica di sinistro",
+                            "nessuna": "Nessuna azione"}}
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "state": [
+    {
+      "type": "text",
+      "text": "Fotogramma dalla telecamera 3:"
+    },
+    {
+      "type": "image",
+      "path": "examples/immagini/casa_incendio.jpg"
+    }
+  ],
+  "image_max_side": 336,
+  "min_confidence": 0.6,
+  "questions": {
+    "incendio": {
+      "type": "noul",
+      "instructions": "C'è un incendio in corso?"
+    },
+    "azione": {
+      "type": "rank",
+      "instructions": "Quale azione è più appropriata?",
+      "criteria": {
+        "chiamare_vigili": "Chiamare subito i vigili del fuoco",
+        "monitorare": "Monitorare la situazione",
+        "nessuna": "Nessuna azione"
+      }
+    }
+  }
+}

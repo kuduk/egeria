@@ -1,0 +1,9 @@
+{
+  "state": "Salve, da due giorni i bonifici verso i nostri fornitori vengono respinti con errore IBAN non valido. Dobbiamo pagare entro giovedì.",
+  "memory": {"recall": 3},
+  "questions": {
+    "reparto": {"type": "choice", "instructions": "Quale reparto deve gestire il ticket?",
+                "criteria": {"pagamenti": "Pagamenti e bonifici", "tecnico": "Bug e malfunzionamenti", "commerciale": "Contratti e offerte"}},
+    "urgente": {"type": "noul", "instructions": "Il ticket è urgente?"}
+  }
+}

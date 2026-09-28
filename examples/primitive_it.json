@@ -1,0 +1,40 @@
+{
+  "state": "Buongiorno, sono tre giorni che i pagamenti ai nostri fornitori falliscono con l'errore 'IBAN non valido', ma l'IBAN è corretto e fino alla settimana scorsa funzionava. Abbiamo stipendi da pagare venerdì. Se non risolvete entro domani passiamo a un altro fornitore.",
+  "embed": true,
+  "questions": {
+    "priorita": {
+      "type": "rank",
+      "instructions": "Quale azione va fatta per prima?",
+      "criteria": {
+        "riparare_pagamenti": "Risolvere il problema dei pagamenti",
+        "offrire_sconto": "Offrire uno sconto commerciale",
+        "inviare_newsletter": "Inviare la newsletter mensile"
+      }
+    },
+    "giorni": {
+      "type": "number",
+      "instructions": "Da quanti giorni falliscono i pagamenti?",
+      "criteria": {
+        "bins": [
+          0,
+          1,
+          2,
+          4,
+          7,
+          null
+        ],
+        "unit": "giorni"
+      }
+    },
+    "lingua": {
+      "type": "open",
+      "instructions": "In che lingua è scritto il messaggio?",
+      "top_k": 3
+    },
+    "oggetto": {
+      "type": "open",
+      "instructions": "Qual è l'argomento principale, in una parola?",
+      "top_k": 3
+    }
+  }
+}

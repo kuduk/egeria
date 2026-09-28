@@ -1,0 +1,21 @@
+{
+  "state": "Riunione di progetto: 12 persone in sala A e altre 3 collegate da remoto. Due colleghi hanno avvisato che arriveranno in ritardo.",
+  "questions": {
+    "partecipanti": {
+      "type": "number",
+      "instructions": "Quante persone partecipano in totale alla riunione, contando anche chi è collegato?",
+      "criteria": {
+        "bins": [
+          0,
+          5,
+          10,
+          14,
+          16,
+          20,
+          null
+        ],
+        "unit": "persone"
+      }
+    }
+  }
+}
