@@ -4,6 +4,8 @@
 
 <p align="center"><img src="src/egeria/web/img/logo.png" alt="Egeria" width="220"></p>
 
+<p align="center">[![Test](https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg)](https://github.com/kuduk/egeria/actions/workflows/tests.yml)</p>
+
 > Il nome viene dalla ninfa Egeria, consigliera del re Numa Pompilio: un consigliere piccolo e rapido che dà il suo parere, e dice quanto ne è sicuro, a chi decide davvero (un LLM grande, un agente, una persona). Fino al 28/09/2026 il progetto si chiamava **semLMM**: pacchetto, comando e cartella sono stati rinominati in `egeria`.
 
 Progetto per costruire un **modello decisionale semantico "System 1"** sulla famiglia **Qwen3.5**, sul modello di Jev (TypeSafe), Laya (Convai) e SemIf.
@@ -25,7 +27,7 @@ Un modello di questo tipo:
 | Interfaccia web generica (`egeria serve`): chiedi su testo, immagini o dal vivo; storico; ricordi | Implementata e collaudata nel browser |
 | Modello separato dal server web (`egeria model-server`, API senza stato, token opzionale) | Implementato e collaudato |
 | Semplificazione: tolti profondità dinamica, `rank`, la domanda `recall`, `embed` dentro la richiesta, `inject` | Completata il 29/09/2026 |
-| **F0.5** – misurare e accelerare senza training: riuso dello stato, controlli senza etichette, calibrazione con spostamento, set di valutazione | Prossimo passo |
+| **F0.5** – misurare e accelerare senza training: riuso dello stato, controlli senza etichette, calibrazione con spostamento, set di valutazione | In corso: riuso dello stato fatto (con le immagini fino all'80% di tempo in meno) |
 | **F1** – primo LoRA su un compito con le immagini, in locale | Dopo F0.5 (roadmap in [02](documentazione/02-implicazioni-e-proposta.md) §6) |
 
 ## Avvio rapido
@@ -37,6 +39,8 @@ uv pip install --python .venv/bin/python -e ".[model,eval,dev]"   # + ",vision" 
 .venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base --permutations 2 examples/ticket_it.json
 .venv/bin/pytest -q
 ```
+
+I test girano anche su GitHub Actions ([.github/workflows/tests.yml](.github/workflows/tests.yml)) a ogni pull request verso `main` e `develop` e dopo ogni merge, senza torch né modello; i test d'integrazione con il modello vero si lanciano in locale con `EGERIA_TEST_MODEL=Qwen/Qwen3.5-0.8B-Base .venv/bin/pytest -q -m model`.
 
 La richiesta ha lo stesso formato di una `POST /v1/systemone` di Jev (`state` + `questions`), e così la risposta. Esempi in [examples/](examples/).
 
@@ -74,6 +78,7 @@ Dettagli in [documentazione/07-interfaccia.md](documentazione/07-interfaccia.md)
 | [documentazione/05-primitive-di-lettura.md](documentazione/05-primitive-di-lettura.md) | Primitive oltre noul/choice/score: verifica, **esempi d'uso** (number, open, vettore dello stato) e confronto con Jev e Laya |
 | [documentazione/06-memoria.md](documentazione/06-memoria.md) | Memoria esterna: ricordi richiamati per somiglianza, voto dei ricordi, gestione dell'archivio |
 | [documentazione/07-interfaccia.md](documentazione/07-interfaccia.md) | Interfaccia web: avvio, architettura (modello e server web separati, API del modello, token), pagina Chiedi, dal vivo, storico, ricordi, impostazioni, API, collaudo |
+| [documentazione/08-riuso-dello-stato.md](documentazione/08-riuso-dello-stato.md) | Riuso dello stato: prefisso calcolato una volta per tutte le domande, verifica, misure, regola della modalità `auto` |
 | [documentazione/fonti.md](documentazione/fonti.md) | Elenco delle fonti per area |
 
 La documentazione è anche in inglese, in [documentazione/en/](documentazione/en/).

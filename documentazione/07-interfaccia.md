@@ -50,7 +50,7 @@ browser ──HTTP──▶ egeria serve (porta 8000)            ──HTTP─�
 | Dipendenze | torch, transformers, GPU | fastapi, uvicorn, httpx, numpy: **niente torch** |
 | Stato | nessuno | `runs/console/`, `runs/memoria-console/` |
 | Porta di default | 8100 | 8000 |
-| Si riavvia per | cambiare modello, calibrazione, permutazioni | aggiornare l'interfaccia |
+| Si riavvia per | cambiare modello, calibrazione, permutazioni, riuso dello stato (`--share-state`, [08](08-riuso-dello-stato.md)) | aggiornare l'interfaccia |
 
 **Come passa una domanda:**
 1. Il server web valida la richiesta e, se lo stato contiene immagini indicate con un percorso, le legge e le trasforma in base64. Accetta solo file dentro il progetto o dentro la cartella dei dati.

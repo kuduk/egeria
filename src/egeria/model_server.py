@@ -131,7 +131,7 @@ def serve_model(args) -> int:
     from .scorer import DecisionScorer
 
     scorer = DecisionScorer(args.model, device=args.device, dtype=args.dtype, quantize=args.quantize,
-                            vision=not args.text_only)
+                            vision=not args.text_only, share_state=args.share_state)
     service = ModelService(scorer, load_temperatures(args.temperatures), permutations=args.permutations,
                            min_confidence=args.min_confidence, image_max_side=args.image_max_side,
                            allow_paths=args.allow_paths)

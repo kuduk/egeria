@@ -42,6 +42,19 @@ def test_batched_equals_single_in_fp32(scorer):
         assert np.abs(alone - together).max() < tolerance
 
 
+def test_state_reuse_matches_full_prompts(scorer):
+    """Prefisso calcolato una volta e code in batch: stesse probabilità dei prompt interi."""
+    probabilities = {}
+    for mode in ("never", "always"):
+        scorer.share_state = mode
+        answers = scorer.decide(JEV_EXAMPLE, permutations=2)["answers"]
+        probabilities[mode] = [answers["is_urgent"]["noul"], *answers["department"]["probabilities"].values(),
+                               *answers["frustration"]["probabilities"].values()]
+    scorer.share_state = "auto"
+    tolerance = 1e-3 if scorer.device.type == "cpu" else 2e-2
+    assert np.abs(np.array(probabilities["never"]) - np.array(probabilities["always"])).max() < tolerance
+
+
 def test_status_and_open_answer(scorer):
     body = {**JEV_EXAMPLE, "min_confidence": 0.99,
             "questions": {**JEV_EXAMPLE["questions"], "word": {"type": "open", "instructions": "Main topic, one word?"}}}

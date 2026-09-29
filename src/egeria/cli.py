@@ -26,6 +26,7 @@ def _scorer(args):
     return DecisionScorer(
         args.model, device=args.device, dtype=args.dtype, quantize=args.quantize,
         prompt_style=args.prompt_style, batch_tokens=args.batch_tokens, vision=getattr(args, "vision", False),
+        share_state=args.share_state,
     )
 
 
@@ -332,6 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="egeria", description="Modello decisionale System 1 su Qwen3.5")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def share_state_arg(p):
+        p.add_argument("--share-state", default="auto", choices=["auto", "always", "never"],
+                       help="riuso dello stato: prefisso (istruzioni + stato) calcolato una volta per tutte le domande")
+
     def model_args(p):
         p.add_argument("--model", default=DEFAULT_MODEL)
         p.add_argument("--device", default="cuda", help="cuda oppure cpu (su cpu usare --dtype float32)")
@@ -341,6 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--batch-tokens", type=int, default=12288)
         p.add_argument("--permutations", type=int, default=1)
         p.add_argument("--vision", action="store_true", help="carica il modello con la torre visiva (stati con immagini)")
+        share_state_arg(p)
 
     sub.add_parser("info", help="ambiente, GPU e kernel veloci").set_defaults(func=cmd_info)
 
@@ -399,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     p.add_argument("--quantize", default=None, choices=["4bit"])
     p.add_argument("--text-only", action="store_true", help="senza torre visiva (niente immagini)")
+    share_state_arg(p)
     p.add_argument("--temperatures", help="file delle temperature (calibrazione, mai applicata alle immagini)")
     p.add_argument("--permutations", type=int, default=2)
     p.add_argument("--min-confidence", type=float, default=0.5, help="soglia di default sotto cui una risposta è 'incerta'")

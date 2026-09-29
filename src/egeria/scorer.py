@@ -3,10 +3,16 @@
 Il modello non genera token. Per ogni prompt si prende l'hidden state finale
 dell'ultima posizione e lo si moltiplica solo per le righe dell'lm_head delle
 lettere A..Z: la softmax è ristretta alle opzioni dichiarate (readout di SemIf).
+
+Riuso dello stato: tutte le domande e le permutazioni su uno stesso stato iniziano con lo
+stesso prefisso (istruzioni + stato, immagini comprese). Il prefisso si calcola una volta con
+la cache; la cache ibrida (stato ricorrente e convoluzione dei layer DeltaNet, KV dei layer di
+attenzione) si duplica per le domande, e si passano in batch solo le code (domanda + opzioni).
 """
 
 from __future__ import annotations
 
+import copy
 import time
 from dataclasses import dataclass
 
@@ -17,6 +23,17 @@ from .images import load_images
 from .prompt import LETTERS, build_messages, build_plain, orderings
 from .schema import Question, parse_request
 
+
+SHARE_MODES = ("auto", "always", "never")
+# Riuso dello stato in modalità auto: si condivide il prefisso se evita almeno questi token
+# (prefisso × righe in più). Misure con scripts/bench_riuso_stato.py (RTX 4070 Laptop, 2 permutazioni,
+# documentazione/08-riuso-dello-stato.md): su GPU il passaggio in più per il prefisso ha un costo fisso
+# (lanci di kernel) che si recupera solo evitando abbastanza token, con pareggio a ~500 token sul 2B e
+# ~1000 sul 0.8B, dove ogni token costa meno. Su CPU il calcolo domina e condividere conviene sempre.
+SHARE_THRESHOLD_GPU_SMALL = 1000  # modelli testuali sotto SMALL_MODEL_PARAMETERS
+SHARE_THRESHOLD_GPU = 500
+SHARE_THRESHOLD_CPU = 1
+SMALL_MODEL_PARAMETERS = 1.2e9
 
 _DISPATCH_INSTALLED = False
 _KERNEL_FUNCTIONS = (
@@ -83,6 +100,7 @@ class DecisionScorer:
         revision: str | None = None,
         vision: bool = False,
         image_batch: int = 6,
+        share_state: str = "auto",
     ):
         import torch
         import transformers
@@ -90,6 +108,9 @@ class DecisionScorer:
         install_device_dispatch()
         if prompt_style not in {"chat", "plain"}:
             raise ValueError("prompt_style deve essere chat o plain")
+        if share_state not in SHARE_MODES:
+            raise ValueError(f"share_state deve essere uno di {SHARE_MODES}")
+        self.share_state = share_state
         self.torch = torch
         self.model_id = model_id
         self.prompt_style = prompt_style
@@ -131,6 +152,7 @@ class DecisionScorer:
             self.body = self.model.model.language_model
         else:
             self.body = self.model.model
+        self.body_parameters = sum(p.numel() for p in self.body.parameters())
         self.pad_id = self.tokenizer.pad_token_id
         if self.pad_id is None:
             self.pad_id = self.tokenizer.eos_token_id
@@ -175,7 +197,82 @@ class DecisionScorer:
     # ----------------------------------------------------------------- forward
 
     def slot_logits(self, sequences: list[list[int]], n_options: list[int]) -> list[np.ndarray]:
-        """Logit degli slot (lettere) all'ultima posizione di ogni sequenza, a batch per lunghezza."""
+        """Logit degli slot (lettere) all'ultima posizione di ogni sequenza.
+
+        Se conviene, il prefisso comune a tutte le sequenze si calcola una volta sola (riuso dello stato).
+        """
+        prefix = self._shared_prefix(sequences)
+        if prefix:
+            with self.torch.inference_mode():
+                cache = self.body(input_ids=self.torch.tensor([sequences[0][:prefix]], device=self.device),
+                                  use_cache=True).past_key_values
+            return self._suffix_logits(self.body, cache, prefix, [seq[prefix:] for seq in sequences], n_options)
+        return self._full_logits(sequences, n_options)
+
+    def _shared_prefix(self, sequences: list[list[int]]) -> int:
+        """Token iniziali comuni a tutte le sequenze, se conviene calcolarli una volta sola; altrimenti 0."""
+        if self.share_state == "never" or len(sequences) < 2:
+            return 0
+        first, limit = sequences[0], min(map(len, sequences)) - 1  # a ogni sequenza resta almeno un token di coda
+        prefix = 0
+        while prefix < limit and all(seq[prefix] == first[prefix] for seq in sequences):
+            prefix += 1
+        return prefix if self._worth_sharing(prefix, len(sequences)) else 0
+
+    def _worth_sharing(self, prefix: int, rows: int) -> bool:
+        """Il prefisso condiviso costa un passaggio in più: conviene solo se evita abbastanza token."""
+        if self.share_state == "always":
+            return prefix > 0
+        return self.share_state == "auto" and prefix * (rows - 1) >= self.share_threshold()
+
+    def share_threshold(self) -> int:
+        """Token evitati a partire dai quali, in modalità auto, conviene condividere il prefisso."""
+        if self.device.type != "cuda":
+            return SHARE_THRESHOLD_CPU
+        return SHARE_THRESHOLD_GPU_SMALL if self.body_parameters < SMALL_MODEL_PARAMETERS else SHARE_THRESHOLD_GPU
+
+    def _suffix_logits(self, model, cache, prefix: int, suffixes: list[list[int]], n_options: list[int],
+                       rope_delta=None) -> list[np.ndarray]:
+        """Logit degli slot per le code, tutte a partire dallo stesso prefisso già in `cache`.
+
+        Per ogni batch la cache del prefisso si copia e si duplica sulle righe. Right padding: con un
+        modello causale le posizioni dopo l'ultimo token reale non cambiano quelle lette.
+        Con le immagini le posizioni M-RoPE delle code sono indice + `rope_delta`.
+        """
+        torch = self.torch
+        order = sorted(range(len(suffixes)), key=lambda i: len(suffixes[i]))
+        finals: list[np.ndarray | None] = [None] * len(suffixes)
+        start = 0
+        while start < len(order):
+            end = start + 1
+            while end < len(order) and (end - start + 1) * len(suffixes[order[end]]) <= self.batch_tokens:
+                end += 1
+            batch = order[start:end]
+            rows, width = len(batch), max(len(suffixes[i]) for i in batch)
+            ids = torch.full((rows, width), self.pad_id, dtype=torch.long, device=self.device)
+            mask = torch.zeros((rows, prefix + width), dtype=torch.long, device=self.device)
+            mask[:, :prefix] = 1
+            for row, index in enumerate(batch):
+                ids[row, : len(suffixes[index])] = torch.tensor(suffixes[index], device=self.device)
+                mask[row, prefix : prefix + len(suffixes[index])] = 1
+            kwargs = {}
+            if rope_delta is not None:
+                positions = torch.arange(prefix, prefix + width, device=self.device) + rope_delta
+                kwargs["position_ids"] = positions.view(1, 1, -1).expand(3, rows, -1)
+            with torch.inference_mode():
+                branch = copy.deepcopy(cache) if end < len(order) else cache  # l'ultimo batch usa l'originale
+                branch.reorder_cache(torch.zeros(rows, dtype=torch.long, device=self.device))
+                out = model(input_ids=ids, attention_mask=mask, past_key_values=branch, use_cache=True, **kwargs)
+                last = torch.tensor([len(suffixes[i]) - 1 for i in batch], device=self.device)
+                hidden = out.last_hidden_state[torch.arange(rows, device=self.device), last].float()
+                logits = (hidden @ self.slot_weight.T).cpu().numpy()
+            for row, index in enumerate(batch):
+                finals[index] = logits[row, : n_options[index]]
+            start = end
+        return finals
+
+    def _full_logits(self, sequences: list[list[int]], n_options: list[int]) -> list[np.ndarray]:
+        """Ogni sequenza per intero, a batch per lunghezza."""
         order = sorted(range(len(sequences)), key=lambda i: len(sequences[i]))
         finals: list[np.ndarray | None] = [None] * len(sequences)
         start = 0
@@ -240,13 +337,30 @@ class DecisionScorer:
         return results
 
     def score_images(self, state, questions: list[Question], permutations: int, images: list):
-        """Readout a lettere con immagini nello stato: processore di Qwen3.5 + modello multimodale."""
+        """Readout a lettere con immagini nello stato: processore di Qwen3.5 + modello multimodale.
+
+        Se conviene, istruzioni e stato (immagini comprese) si calcolano una volta sola e si
+        passano in batch solo le code; altrimenti ogni prompt porta la sua copia delle immagini.
+        """
         torch = self.torch
         plan, texts = [], []
         for qi, question in enumerate(questions):
             for order in orderings(question, permutations):
                 plan.append((qi, order))
                 texts.append(self._prompt_text(state, question, order))
+        cut = self._state_boundary(texts)
+        if cut is not None:
+            self.multimodal.rope_deltas = None  # niente spostamenti M-RoPE rimasti da una richiesta precedente
+            prefix_inputs = self.processor(text=[texts[0][:cut]], images=images, return_tensors="pt").to(self.device)
+            prefix = int(prefix_inputs["input_ids"].shape[1])
+            suffixes = [self.tokenizer.encode(text[cut:], add_special_tokens=False) for text in texts]
+            if self._worth_sharing(prefix, len(texts)):
+                with torch.inference_mode():
+                    cache = self.multimodal(**prefix_inputs, use_cache=True).past_key_values
+                delta = self.multimodal.rope_deltas.reshape(-1)[0]
+                finals = self._suffix_logits(self.multimodal, cache, prefix, suffixes,
+                                             [len(order) for _, order in plan], rope_delta=delta)
+                return self._combine(questions, plan, [prefix + len(s) for s in suffixes], finals)
         finals, lengths = [], []
         for start in range(0, len(texts), self.image_batch):
             chunk = texts[start : start + self.image_batch]
@@ -259,6 +373,25 @@ class DecisionScorer:
             finals += list(logits)
             lengths += inputs["attention_mask"].sum(1).tolist()
         return self._combine(questions, plan, lengths, finals)
+
+    def _state_boundary(self, texts: list[str]) -> int | None:
+        """Posizione, uguale in tutti i prompt, subito dopo il blocco dello stato; None se non si può tagliare lì.
+
+        Il taglio non deve cambiare la tokenizzazione: si verifica su ogni prompt.
+        """
+        if self.share_state == "never" or len(texts) < 2:
+            return None
+        marker = "</state>\n\n"
+        cut = texts[0].find(marker)
+        if cut < 0:
+            return None
+        cut += len(marker)
+        encode = lambda text: self.tokenizer.encode(text, add_special_tokens=False)  # noqa: E731
+        head = encode(texts[0][:cut])
+        for text in texts:
+            if text[:cut] != texts[0][:cut] or encode(text) != head + encode(text[cut:]):
+                return None
+        return cut
 
     def decide(
         self,

@@ -109,7 +109,7 @@ The answers are identical and the probabilities match within bf16 noise.
 
 **Takeaways:**
 - **With small images, repetition is cheap.** On the 0.8B at 224 px the 2 extra questions, image included, cost 9 ms (42 → 51 ms). The shared variant makes **two sequential passes** (prefix, then tails), so it pays the fixed per-pass cost twice, about 35–40 ms of small kernels on the 0.8B.
-- **With large images or more questions, sharing wins clearly**, up to −58%, because each extra question costs only its tail. The multimodal scorer will have to pick the strategy based on visual tokens × questions.
+- **With large images or more questions, sharing wins clearly**, up to −58%, because each extra question costs only its tail. Since 29/09/2026 the scorer picks it by itself, based on the avoided tokens: with the suite images the time drops by up to 80% ([08-state-reuse.md](08-state-reuse.md)).
 - **The real limit is the fixed per-pass cost**: 42 ms for one question on the 0.8B, of which only 8 ms is the vision tower.
 
 **Next steps towards real time:**
@@ -126,7 +126,7 @@ The answers are identical and the probabilities match within bf16 noise.
 - **Supported question types:** `noul`, `choice`, `score`, `number` and `open`, with permutations and `min_confidence` (below the threshold the answer is `uncertain`).
 - **Memory and the state vector (`/v1/embed`) also work with images:** the vector includes the visual tokens. Check: 5/6 in [06-memory.md](06-memory.md) §6.
 - **`open` (one word or a value) also works with images** and reads dates, amounts and codes (§7).
-- **Efficiency.** The prompt with the image is repeated for every question and permutation. With small images this costs little; with large images the shared prefix (§4) pays off, but it is still to be integrated.
+- **Efficiency.** Since 29/09/2026 the instructions and images are computed once for all questions and permutations, when it pays off (`auto` mode, [08-state-reuse.md](08-state-reuse.md)). With small images and few questions each question keeps its full prompt, which is cheaper there.
 
 ## 6. Usage examples
 

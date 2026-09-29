@@ -23,7 +23,7 @@ Phase F0 turns a Qwen3.5 into a decision model compatible with the Jev API, **wi
 |---|---|
 | [src/egeria/schema.py](../../src/egeria/schema.py) | Validation of the `/v1/systemone` body (noul, choice with up to 26 options, score with 2 to 10 levels) |
 | [src/egeria/prompt.py](../../src/egeria/prompt.py) | Prompts with lettered options and orderings for the permutations |
-| [src/egeria/scorer.py](../../src/egeria/scorer.py) | `DecisionScorer`: model loading (text only, no vision tower), batched forward with right padding, final readout, `decide()` in Jev format |
+| [src/egeria/scorer.py](../../src/egeria/scorer.py) | `DecisionScorer`: model loading (text only, no vision tower), batched forward with right padding, state reuse ([08](08-state-reuse.md)), final readout, `decide()` in Jev format |
 | [src/egeria/confidence.py](../../src/egeria/confidence.py) | Softmax with temperature, Jev `confidence` formulas, response format |
 | [src/egeria/calibration.py](../../src/egeria/calibration.py) | Temperature scaling (golden-section search on 1/T; the NLL is convex) |
 | [src/egeria/metrics.py](../../src/egeria/metrics.py) | Accuracy, NLL, KL, Brier, ECE, coverage at 5% error, score MAE, flip rate |

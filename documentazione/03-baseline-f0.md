@@ -23,7 +23,7 @@ La F0 trasforma un Qwen3.5 **senza alcun training** in un modello decisionale co
 |---|---|
 | [src/egeria/schema.py](../src/egeria/schema.py) | Validazione del body `/v1/systemone` (noul, choice fino a 26 opzioni, score da 2 a 10 livelli) |
 | [src/egeria/prompt.py](../src/egeria/prompt.py) | Prompt con opzioni a lettere e ordinamenti per le permutazioni |
-| [src/egeria/scorer.py](../src/egeria/scorer.py) | `DecisionScorer`: caricamento del modello (solo testo, niente torre visiva), forward batch con right padding, readout finale, `decide()` in formato Jev |
+| [src/egeria/scorer.py](../src/egeria/scorer.py) | `DecisionScorer`: caricamento del modello (solo testo, niente torre visiva), forward batch con right padding, riuso dello stato ([08](08-riuso-dello-stato.md)), readout finale, `decide()` in formato Jev |
 | [src/egeria/confidence.py](../src/egeria/confidence.py) | Softmax con temperatura, formule di `confidence` di Jev, formato della risposta |
 | [src/egeria/calibration.py](../src/egeria/calibration.py) | Temperature scaling (ricerca della sezione aurea su 1/T, la NLL è convessa) |
 | [src/egeria/metrics.py](../src/egeria/metrics.py) | Accuratezza, NLL, KL, Brier, ECE, copertura al 5% d'errore, score MAE, flip rate |

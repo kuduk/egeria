@@ -50,7 +50,7 @@ browser ──HTTP──▶ egeria serve (port 8000)             ──HTTP─�
 | Dependencies | torch, transformers, GPU | fastapi, uvicorn, httpx, numpy: **no torch** |
 | State | none | `runs/console/`, `runs/memoria-console/` |
 | Default port | 8100 | 8000 |
-| Restart it to | change model, calibration, permutations | update the web UI |
+| Restart it to | change model, calibration, permutations, state reuse (`--share-state`, [08](08-state-reuse.md)) | update the web UI |
 
 **How a question flows:**
 1. The web server validates the request and, if the state contains images given as a path, reads them and converts them to base64. It only accepts files inside the project or inside the data folder.

@@ -279,6 +279,26 @@ def test_questions_required_and_state_validation():
             parse_state(state)
 
 
+def test_state_reuse_policy():
+    """Modalità auto: si condivide il prefisso solo oltre la soglia misurata per dispositivo e taglia."""
+    from types import SimpleNamespace
+
+    from egeria.scorer import DecisionScorer
+
+    scorer = DecisionScorer.__new__(DecisionScorer)  # senza caricare un modello
+    scorer.share_state, scorer.body_parameters = "auto", 0.8e9
+    scorer.device = SimpleNamespace(type="cuda")
+    assert not scorer._worth_sharing(300, 3) and scorer._worth_sharing(300, 5)  # 600 e 1200 token evitati
+    scorer.body_parameters = 1.9e9
+    assert scorer._worth_sharing(300, 3)
+    scorer.device = SimpleNamespace(type="cpu")
+    assert scorer._worth_sharing(50, 2)
+    scorer.share_state = "never"
+    assert not scorer._worth_sharing(5000, 10)
+    scorer.share_state = "always"
+    assert scorer._worth_sharing(10, 2) and not scorer._worth_sharing(0, 2)
+
+
 def test_number_answers():
     number = _one({"type": "number", "instructions": "x", "criteria": [0, 10, 20]})
     result = answer(number, [0.5, 0.5])
