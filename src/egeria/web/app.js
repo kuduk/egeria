@@ -647,6 +647,20 @@ function plainQuestions() {
 
 // =================================================================== dal vivo
 
+// Video da file per la modalità dal vivo: solo tipi video noti, e il tipo del Blob viene da questa
+// tabella, non dal file. L'URL è sempre blob: (mai javascript: o data:) e si libera con revokeObjectURL.
+const VIDEO_TYPES = {
+  "video/mp4": "video/mp4", "video/webm": "video/webm", "video/ogg": "video/ogg",
+  "video/quicktime": "video/quicktime", "video/x-matroska": "video/x-matroska",
+};
+
+function localVideoUrl(file) {
+  const type = VIDEO_TYPES[file.type];
+  if (!type) return null;
+  const url = URL.createObjectURL(new Blob([file], { type }));
+  return url.startsWith("blob:") ? url : null;
+}
+
 const Live = {
   stream: null, ready: false, running: false, frames: [], latencies: [], cooldown: {},
 
@@ -660,10 +674,14 @@ const Live = {
     this.video = document.getElementById("live-video");
     document.getElementById("live-file").addEventListener("change", (event) => {
       const file = event.target.files[0];
+      event.target.value = ""; // si può riscegliere lo stesso file
       if (!file) return;
+      const url = localVideoUrl(file);
+      if (!url) { toast("Scegli un file video (MP4, WebM, Ogg, MOV o MKV).", "error"); return; }
       this.stopStream();
       this.video.srcObject = null;
-      this.video.src = URL.createObjectURL(file);
+      this.video.src = url;
+      this.fileUrl = url;
       this.video.loop = true;
       this.setReady();
     });
@@ -706,6 +724,7 @@ const Live = {
   stopStream() {
     if (this.stream) this.stream.getTracks().forEach((track) => track.stop());
     this.stream = null;
+    if (this.fileUrl) { URL.revokeObjectURL(this.fileUrl); this.fileUrl = null; } // libera il video da file precedente
   },
 
   grab(maxSide) {
@@ -956,7 +975,8 @@ async function refreshInfo() {
     status.title = modelUp ? `${info.model} · ${info.gpu || info.device} · ${info.model_url}`
       : `${info.model_error}. Storico e ricordi restano consultabili.`;
     document.getElementById("settings-info").textContent = modelUp
-      ? `Modello: ${info.model} · ${info.gpu || info.device} · ${info.memories} ricordi`
+      ? `Modello: ${info.model} · ${info.gpu || info.device} · ${info.memories} ricordi` +
+        (info.memories_suspended ? ` · ${info.memories_suspended} sospesi (immagini non più leggibili, vedi memories-sospese.jsonl)` : "")
       : `Il modello non risponde su ${info.model_url}: avvialo con «egeria model-server». ${info.memories} ricordi`;
     setPill("storico", info.cases.da_rivedere, false);
     setPill("ricordi", info.memories, true);

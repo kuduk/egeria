@@ -82,7 +82,8 @@ class ModelService:
         started = time.perf_counter()
         with self.lock:
             result, tokens = self.scorer.analyze_state(state, image_max_side=side if is_multimodal(state) else None)
-        return {**result, "input_tokens": tokens, "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
+        return {**result, "model": getattr(self.scorer, "model_id", None), "input_tokens": tokens,
+                "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
 
 
 def create_model_app(service: ModelService, info: dict | None = None, token: str | None = None):

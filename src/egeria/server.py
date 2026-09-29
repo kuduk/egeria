@@ -24,7 +24,8 @@ from typing import Any
 import numpy as np
 
 from .client import ModelUnavailable
-from .memory import Memory, MemoryStore, apply_memory_context, describe_state, memory_context, needs_embedding
+from .memory import (Memory, MemoryStore, apply_memory_context, describe_state, ensure_model, memory_context,
+                     needs_embedding)
 from .schema import RequestError, is_multimodal, parse_request, parse_state
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -171,7 +172,37 @@ class Engine:
 
     def embed(self, state: Any) -> np.ndarray:
         side = self.image_max_side if is_multimodal(state) else None
-        return self.client.embed(self.inline_images(state), side)
+        return self._embed_inlined(self.inline_images(state), side)
+
+    def _embed_inlined(self, state: Any, side: int | None) -> np.ndarray:
+        """Vettore dello stato (immagini già in base64), con l'archivio reso coerente con il modello."""
+        vector, model = self.client.embed(state, side)
+        self._ensure_model(model, len(vector))
+        return vector
+
+    def _ensure_model(self, model: str | None, dim: int) -> None:
+        """Se il server del modello ora usa un altro modello, ricalcola i vettori dei ricordi.
+
+        Succede quando si riavvia `model-server` con un altro `--model`: i vettori vecchi hanno un'altra
+        dimensione, o comunque non sono confrontabili con quelli nuovi.
+        """
+        with self.lock:
+            if self.memory.model == model and (not self.memory.items or self.memory.dim == dim):
+                return
+
+            def embed(state):
+                side = self.image_max_side if is_multimodal(state) else None
+                return self.client.embed(self.inline_images(state), side)[0]
+
+            report = ensure_model(self.memory, model, dim, embed)
+            if report["action"] == "none":
+                return
+            self.memory.save(self.memory_dir)
+            if report["action"] == "reforged":
+                suspended = (f", {report['suspended']} sospesi in {self.memory_dir}/memories-sospese.jsonl"
+                             if report["suspended"] else "")
+                print(f"Egeria: ricordi ricalcolati con il modello {model}: {report['reforged']} ricordi{suspended}",
+                      flush=True)
 
     # ----------------------------------------------------------- decisioni
 
@@ -188,7 +219,7 @@ class Engine:
         embedding = None
         if needs_embedding(body, store):
             side = body["image_max_side"] if is_multimodal(state) else None
-            embedding = self.client.embed(body["state"], side)
+            embedding = self._embed_inlined(body["state"], side)
         with self.lock:
             context = memory_context(body, questions, store, embedding)
 
@@ -322,7 +353,8 @@ def create_app(engine: Engine, info: dict | None = None):
 
     @app.get("/api/info")
     def api_info():
-        return {**engine.model_info(), **info, "memories": len(engine.memory), "cases": engine.cases.counts(),
+        return {**engine.model_info(), **info, "memories": len(engine.memory), "memory_model": engine.memory.model,
+                "memories_suspended": engine.memory.suspended_count, "cases": engine.cases.counts(),
                 "image_max_side": engine.image_max_side}
 
     # API compatibile Jev (con le estensioni Egeria).

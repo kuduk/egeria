@@ -9,6 +9,11 @@ migliorava le decisioni (documentazione/06-memoria.md).
 
 Gli hidden state di un LLM sono anisotropi: tutte le coppie hanno coseno alto.
 Con abbastanza ricordi si sottrae la media dell'archivio prima del coseno.
+
+I vettori dipendono dal modello che li ha calcolati. L'archivio registra quel modello
+(`store.json`): se il modello cambia, i vettori si ricalcolano dagli stati dei ricordi
+(`ensure_model`). I ricordi che non si possono ricalcolare (per esempio un'immagine
+cancellata) passano in `memories-sospese.jsonl`, fuori dalla ricerca ma non persi.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ import numpy as np
 from .schema import render_value
 
 CENTER_MIN_ITEMS = 20
+STORE_FILE = "store.json"
+SUSPENDED_FILE = "memories-sospese.jsonl"
 # Il voto usa fino a 10 ricordi: con meno è troppo sicuro (typed-decisions: NLL 1.22 con 3, 0.96 con 10).
 VOTE_K = 10
 VOTE_SMOOTHING = 0.1
@@ -61,14 +68,25 @@ class MemoryStore:
         self.items: list[Memory] = []
         self.vectors = np.zeros((0, 0), dtype=np.float32)
         self._profile: np.ndarray | None = None
+        self.model: str | None = None  # modello che ha calcolato i vettori (None: archivio senza registrazione)
+        self.suspended: list[dict] = []  # sospesi in questa sessione, da aggiungere al file al prossimo save
+        self.suspended_count = 0  # sospesi in tutto, file compreso
 
     def __len__(self) -> int:
         return len(self.items)
+
+    @property
+    def dim(self) -> int:
+        """Dimensione dei vettori (0 se l'archivio è vuoto)."""
+        return int(self.vectors.shape[1]) if self.items else 0
 
     def add(self, vector, memory: Memory) -> None:
         vector = np.asarray(vector, dtype=np.float32)[None, :]
         if any(item.id == memory.id for item in self.items):
             raise ValueError(f"ricordo {memory.id!r} già presente")
+        if self.items and vector.shape[1] != self.dim:
+            raise ValueError(f"vettore da {vector.shape[1]} dimensioni in un archivio da {self.dim}: "
+                             "l'archivio va ricalcolato con ensure_model")
         self.vectors = vector if not len(self.items) else np.concatenate([self.vectors, vector])
         self.items.append(memory)
         self._profile = None
@@ -141,6 +159,30 @@ class MemoryStore:
                 break
         return found
 
+    def reforge(self, embed, model: str | None) -> dict:
+        """Ricalcola il vettore di ogni ricordo con `embed(stato)`, cioè con un altro modello.
+
+        I ricordi il cui stato non si può più leggere (immagine cancellata, stato non valido)
+        passano fra i sospesi. Se `embed` fallisce per altri motivi (per esempio il modello non
+        risponde), l'errore si propaga e l'archivio resta com'era.
+        """
+        from .schema import RequestError
+
+        vectors, kept, suspended = [], [], []
+        for item in self.items:
+            try:
+                vectors.append(np.asarray(embed(item.state), dtype=np.float32))
+                kept.append(item)
+            except (RequestError, OSError, ValueError) as error:
+                suspended.append({"memory": asdict(item), "reason": str(error), "model": model})
+        self.items = kept
+        self.vectors = np.stack(vectors) if vectors else np.zeros((0, 0), dtype=np.float32)
+        self.model = model
+        self._profile = None
+        self.suspended.extend(suspended)
+        self.suspended_count += len(suspended)
+        return {"action": "reforged", "model": model, "reforged": len(kept), "suspended": len(suspended)}
+
     def save(self, directory: str | Path) -> None:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
@@ -148,11 +190,21 @@ class MemoryStore:
         with (directory / "memories.jsonl").open("w") as handle:
             for item in self.items:
                 handle.write(json.dumps(asdict(item), ensure_ascii=False) + "\n")
+        (directory / STORE_FILE).write_text(json.dumps({"model": self.model, "dim": self.dim}, indent=2))
+        if self.suspended:
+            with (directory / SUSPENDED_FILE).open("a") as handle:
+                for entry in self.suspended:
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self.suspended = []
 
     @classmethod
     def load(cls, directory: str | Path) -> "MemoryStore":
         directory = Path(directory)
         store = cls()
+        if (directory / STORE_FILE).exists():
+            store.model = json.loads((directory / STORE_FILE).read_text()).get("model")
+        if (directory / SUSPENDED_FILE).exists():
+            store.suspended_count = sum(1 for line in (directory / SUSPENDED_FILE).read_text().splitlines() if line)
         if not (directory / "memories.jsonl").exists():
             return store
         store.vectors = np.load(directory / "vectors.npy")
@@ -160,6 +212,23 @@ class MemoryStore:
         if len(store.items) != len(store.vectors):
             raise ValueError(f"archivio incoerente in {directory}: {len(store.items)} ricordi, {len(store.vectors)} vettori")
         return store
+
+
+def ensure_model(store: MemoryStore, model: str | None, dim: int, embed) -> dict:
+    """Rende l'archivio confrontabile con i vettori di `model` (dimensione `dim`).
+
+    - archivio vuoto, oppure registrato senza modello ma con la stessa dimensione: si registra `model`;
+    - stesso modello e stessa dimensione: niente da fare;
+    - modello o dimensione diversi: si ricalcolano tutti i vettori con `embed(stato)`.
+
+    Restituisce che cosa è stato fatto (`action`: none, adopted, reforged); il chiamante salva.
+    """
+    if store.items and (dim != store.dim or store.model not in (None, model)):
+        return store.reforge(embed, model)
+    if store.model != model and model is not None:
+        store.model = model
+        return {"action": "adopted", "model": model}
+    return {"action": "none", "model": store.model}
 
 
 def decisions_from_answers(answers: dict) -> dict[str, str]:

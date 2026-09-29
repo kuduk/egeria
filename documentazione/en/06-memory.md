@@ -106,7 +106,15 @@ M="--model Qwen/Qwen3.5-2B-Base --memory runs/mia-memoria"
 .venv/bin/egeria memory --model Qwen/Qwen3.5-2B-Base --memory runs/memoria-Qwen3.5-2B-Base build
 ```
 
-The store is a folder with `memories.jsonl` (human-readable memories) and `vectors.npy` (vectors). The vector depends on the model: if you change model, the store must be rebuilt.
+The store is a folder with:
+- `memories.jsonl`, the human-readable memories;
+- `vectors.npy`, the vectors;
+- `store.json`, the model that computed the vectors (since 29/09/2026).
+
+**If you change model, the vectors are recomputed automatically.** The vector depends on the model: vectors from different models cannot be compared, and with different sizes they do not even have the same dimension (1024 in the 0.8B, 2048 in the 2B). On the first memory operation with a model other than the recorded one, Egeria recomputes every memory's vector from its state: the text, or the image given by its path. Both the web server and the command line do this.
+- **Memories that cannot be recomputed** (for example a deleted image) move to `memories-sospese.jsonl`, with the reason: they stay out of the search but are not lost. The interface shows how many there are in the settings.
+- **Stores without `store.json`**, i.e. created before 29/09/2026: if the vector dimension matches, the current model is recorded; otherwise the vectors are recomputed.
+- **Recomputing costs one pass per memory:** a few tens of ms each on GPU. Before this fix, a store used with a model of a different size made the web server answer every question with memories with a 500 error.
 
 **What to save.** Only **confirmed** decisions (outcomes, human corrections). Saving the model's answers without verification would reinforce its errors; that is why `decide` never writes to memory.
 

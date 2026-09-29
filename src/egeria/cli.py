@@ -49,10 +49,23 @@ def cmd_info(_args) -> int:
     return 0
 
 
-def _memory(args):
-    from .memory import MemoryStore
+def _memory(args, scorer=None):
+    """Archivio dei ricordi; con uno scorer, reso coerente con il suo modello (vettori ricalcolati se serve)."""
+    from .memory import MemoryStore, ensure_model
 
-    return MemoryStore.load(args.memory) if getattr(args, "memory", None) else None
+    if not getattr(args, "memory", None):
+        return None
+    store = MemoryStore.load(args.memory)
+    if scorer is not None:
+        side = getattr(args, "image_max_side", None)
+        report = ensure_model(store, scorer.model_id, scorer.embedding_dim,
+                              lambda state: scorer.analyze_state(state, image_max_side=side)[0]["embedding"])
+        if report["action"] != "none":
+            store.save(args.memory)
+        if report["action"] == "reforged":
+            print(f"ricordi ricalcolati con {scorer.model_id}: {report['reforged']} ricordi, "
+                  f"{report['suspended']} sospesi", file=sys.stderr)
+    return store
 
 
 def cmd_decide(args) -> int:
@@ -65,9 +78,10 @@ def cmd_decide(args) -> int:
     args.vision = args.vision or is_multimodal(body.get("state"))
     if args.recall and "memory" not in body:
         body["memory"] = {"recall": args.recall}
-    response = _scorer(args).decide(
+    scorer = _scorer(args)
+    response = scorer.decide(
         body, permutations=args.permutations, temperatures=load_temperatures(args.temperatures),
-        default_min_confidence=args.min_confidence, memory=_memory(args),
+        default_min_confidence=args.min_confidence, memory=_memory(args, scorer),
     )
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0
@@ -313,10 +327,11 @@ def cmd_memory(args) -> int:
             store.add(vector, Memory(case["id"], state, decisions, meta={"workflow": case["workflow"]}))
             if number % 100 == 0 or number == len(cases):
                 print(f"{number}/{len(cases)} ricordi", file=sys.stderr)
+        store.model = scorer.model_id
         store.save(args.memory)
         print(f"archivio {args.memory}: {len(store)} ricordi")
         return 0
-    store = MemoryStore.load(args.memory)
+    store = _memory(args, scorer)
     vector = scorer.analyze_state(state, image_max_side=args.image_max_side)[0]["embedding"]
     if args.action == "add":
         decisions = json.loads(args.decisions) if args.decisions else {}

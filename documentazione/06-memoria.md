@@ -106,7 +106,15 @@ M="--model Qwen/Qwen3.5-2B-Base --memory runs/mia-memoria"
 .venv/bin/egeria memory --model Qwen/Qwen3.5-2B-Base --memory runs/memoria-Qwen3.5-2B-Base build
 ```
 
-L'archivio è una cartella con `memories.jsonl` (ricordi leggibili) e `vectors.npy` (vettori). Il vettore dipende dal modello: se si cambia modello, l'archivio va ricostruito.
+L'archivio è una cartella con:
+- `memories.jsonl`, i ricordi leggibili;
+- `vectors.npy`, i vettori;
+- `store.json`, il modello che ha calcolato i vettori (dal 29/09/2026).
+
+**Se si cambia modello, i vettori si ricalcolano da soli.** Il vettore dipende dal modello: quelli di modelli diversi non si possono confrontare, e con taglie diverse non hanno nemmeno la stessa dimensione (1024 nello 0.8B, 2048 nel 2B). Alla prima operazione sui ricordi con un modello diverso da quello registrato, Egeria ricalcola il vettore di ogni ricordo dal suo stato: testo, oppure l'immagine indicata dal percorso. Lo fanno sia il server web sia la riga di comando.
+- **Ricordi non ricalcolabili** (per esempio un'immagine cancellata) passano in `memories-sospese.jsonl`, con il motivo: restano fuori dalla ricerca ma non vanno persi. L'interfaccia ne mostra il numero nelle impostazioni.
+- **Archivi senza `store.json`**, cioè creati prima del 29/09/2026: se la dimensione dei vettori coincide si registra il modello in uso; altrimenti si ricalcolano.
+- **Il ricalcolo costa un passaggio per ricordo:** qualche decina di ms ciascuno su GPU. Prima della correzione, un archivio usato con un modello di taglia diversa faceva rispondere il server web con un errore 500 a ogni domanda con i ricordi.
 
 **Cosa salvare.** Solo decisioni **confermate** (esiti, correzioni umane). Salvare le risposte del modello senza verifica ne rinforzerebbe gli errori; per questo `decide` non scrive mai nella memoria.
 

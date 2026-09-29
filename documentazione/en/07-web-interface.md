@@ -22,7 +22,7 @@ uv pip install --python .venv/bin/python -e ".[model,eval,vision,server]"   # fi
 Then, in the browser (from Windows too, if the server runs in WSL): **http://localhost:8000/**.
 
 - **Startup order:** it does not matter. If the model does not respond, the UI flags it at the top ("Modello non raggiungibile", "Model unreachable") and, on the first question, explains how to start it. History and memories remain available.
-- **Switching model without closing the UI:** stop and restart only `model-server`, for example with `--model Qwen/Qwen3.5-0.8B-Base`. History and memories do not change.
+- **Switching model without closing the UI:** stop and restart only `model-server`, for example with `--model Qwen/Qwen3.5-0.8B-Base`. History and memories do not change: on the first question with memories, their vectors are recomputed for the new model ([06-memory.md](06-memory.md) §5).
 - **Stopping them:** `Ctrl+C` in each terminal. If they were started in the background:
   - `pgrep -f '^/home/kuduk/egeria/.venv/bin/python .venv/bin/egeria model-server' | xargs kill`
   - `pgrep -f '^/home/kuduk/egeria/.venv/bin/python .venv/bin/egeria serve' | xargs kill`
@@ -64,7 +64,7 @@ browser ──HTTP──▶ egeria serve (port 8000)             ──HTTP─�
 |---|---|---|
 | `GET /v1/info` | | model, device, GPU, vision component, permutations, default threshold, calibration |
 | `POST /v1/systemone` | Jev body (`state`, `questions`, `min_confidence`, `image_max_side`) plus `permutations` (1–8) and `calibrated` (`false` = raw probabilities) | Jev response with the Egeria extensions |
-| `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (L2-normalized), `embedding_dim`, `input_tokens`, `latency_ms` |
+| `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (L2-normalized), `embedding_dim`, `model` (the model that computed it), `input_tokens`, `latency_ms` |
 
 Example, directly against the model server:
 
@@ -175,7 +175,7 @@ Settings are kept in the browser.
 | Method and path | Use |
 |---|---|
 | `POST /v1/systemone` | Jev-compatible API, with the Egeria extensions **and memories** (`memory.recall`, `memory.min_similarity`, `memory.vote`) |
-| `GET /api/info` | model and model server status (`model_status`: `ok` or `non_raggiungibile`), number of memories and of analyses |
+| `GET /api/info` | model and model server status (`model_status`: `ok` or `non_raggiungibile`), number of memories and of analyses, model of the memory vectors (`memory_model`) and suspended memories (`memories_suspended`) |
 | `GET /api/cases?view=da_rivedere\|tutti` | history |
 | `POST /api/cases` | `{"request": <body /v1/systemone>}`: analyzes and saves to history |
 | `GET /api/cases/{id}`, `POST /api/cases/{id}/review` | detail; saving to memories with `{"decisions": {...}, "note": ...}` |
@@ -214,6 +214,7 @@ The automated tests ([tests/test_server.py](../../tests/test_server.py)) make th
 ## 9. Design choices
 
 - **No build step:** static HTML, CSS and JS served by FastAPI. The DOM is built only with `textContent` (no XSS).
+- **Video from file, in live mode:** only MP4, WebM, Ogg, MOV and MKV are accepted. The file becomes a `blob:` URL whose type comes from a fixed table (not from the file), and the previous URL is released when the video changes. This fixed, on 29/09/2026, the CodeQL alert `js/xss-through-dom`, verified locally with CodeQL 2.27.1: zero alerts with the code scanning suite and with `security-extended`.
 - **Style:** dark or light theme, Fira Sans/Fira Code, SVG icons.
   - **Logo:** [img/logo.png](../../src/egeria/web/img/logo.png). The top bar shows the emblem on a light rounded tile, identical in both themes, next to the name in letter-spaced capitals like the lettering in the logo. The light tile is needed because the face is drawn with the white of the background: on a dark background the emblem would turn into a negative.
   - **Derived images:** emblem, favicon, iPhone icon and the two 1280×640 social previews for GitHub (centered logo, or emblem and lettering side by side) are generated with `.venv/bin/python scripts/genera_icone.py`, to be rerun whenever the logo changes.

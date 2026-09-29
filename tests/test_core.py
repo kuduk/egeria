@@ -336,6 +336,42 @@ def test_memory_store_search_save_load(tmp_path):
         store.add([0.0, 0.0, 1.0], Memory("a", "doppione"))
 
 
+def test_memory_store_follows_the_model(tmp_path):
+    """L'archivio registra il modello; con un altro modello i vettori si ricalcolano dagli stati."""
+    import json
+
+    from egeria.memory import Memory, MemoryStore, ensure_model
+
+    store = MemoryStore()
+    store.add([1.0, 0.0, 0.0], Memory("a", "stato a", {"q": "x"}))
+    store.add([0.0, 1.0, 0.0], Memory("b", [{"type": "image", "path": "sparita.jpg"}]))
+
+    def embed(state):
+        if isinstance(state, list):
+            raise RequestError("immagine non leggibile")
+        return [1.0, 0.0]
+
+    assert ensure_model(store, "m1", 3, embed)["action"] == "adopted" and store.model == "m1"
+    assert ensure_model(store, "m1", 3, embed)["action"] == "none"
+    report = ensure_model(store, "m2", 2, embed)  # altro modello, vettori da 2
+    assert report == {"action": "reforged", "model": "m2", "reforged": 1, "suspended": 1}
+    assert store.dim == 2 and [item.id for item in store.items] == ["a"]
+    store.save(tmp_path / "m")
+    again = MemoryStore.load(tmp_path / "m")
+    assert again.model == "m2" and again.suspended_count == 1 and len(again) == 1
+    suspended = json.loads((tmp_path / "m" / "memories-sospese.jsonl").read_text().splitlines()[0])
+    assert suspended["memory"]["id"] == "b" and "non leggibile" in suspended["reason"]
+    with pytest.raises(ValueError):
+        again.add([1.0, 0.0, 0.0], Memory("c", "vettore di un altro modello"))
+
+    def down(state):
+        raise RuntimeError("il modello non risponde")
+
+    with pytest.raises(RuntimeError):
+        ensure_model(again, "m3", 2, down)
+    assert again.model == "m2" and len(again) == 1  # archivio invariato
+
+
 def test_memory_options():
     from egeria.schema import memory_options
 

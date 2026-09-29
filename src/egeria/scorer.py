@@ -153,6 +153,7 @@ class DecisionScorer:
         else:
             self.body = self.model.model
         self.body_parameters = sum(p.numel() for p in self.body.parameters())
+        self.embedding_dim = int(self.body.config.hidden_size)  # dimensione dei vettori di analyze_state
         self.pad_id = self.tokenizer.pad_token_id
         if self.pad_id is None:
             self.pad_id = self.tokenizer.eos_token_id
