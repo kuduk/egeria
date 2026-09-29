@@ -26,6 +26,7 @@ def _scorer(args):
     return DecisionScorer(
         args.model, device=args.device, dtype=args.dtype, quantize=args.quantize,
         prompt_style=args.prompt_style, batch_tokens=args.batch_tokens, vision=getattr(args, "vision", False),
+        share_state=args.share_state,
     )
 
 
@@ -48,10 +49,23 @@ def cmd_info(_args) -> int:
     return 0
 
 
-def _memory(args):
-    from .memory import MemoryStore
+def _memory(args, scorer=None):
+    """Archivio dei ricordi; con uno scorer, reso coerente con il suo modello (vettori ricalcolati se serve)."""
+    from .memory import MemoryStore, ensure_model
 
-    return MemoryStore.load(args.memory) if getattr(args, "memory", None) else None
+    if not getattr(args, "memory", None):
+        return None
+    store = MemoryStore.load(args.memory)
+    if scorer is not None:
+        side = getattr(args, "image_max_side", None)
+        report = ensure_model(store, scorer.model_id, scorer.embedding_dim,
+                              lambda state: scorer.analyze_state(state, image_max_side=side)[0]["embedding"])
+        if report["action"] != "none":
+            store.save(args.memory)
+        if report["action"] == "reforged":
+            print(f"ricordi ricalcolati con {scorer.model_id}: {report['reforged']} ricordi, "
+                  f"{report['suspended']} sospesi", file=sys.stderr)
+    return store
 
 
 def cmd_decide(args) -> int:
@@ -64,9 +78,10 @@ def cmd_decide(args) -> int:
     args.vision = args.vision or is_multimodal(body.get("state"))
     if args.recall and "memory" not in body:
         body["memory"] = {"recall": args.recall}
-    response = _scorer(args).decide(
+    scorer = _scorer(args)
+    response = scorer.decide(
         body, permutations=args.permutations, temperatures=load_temperatures(args.temperatures),
-        default_min_confidence=args.min_confidence, memory=_memory(args),
+        default_min_confidence=args.min_confidence, memory=_memory(args, scorer),
     )
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0
@@ -312,10 +327,11 @@ def cmd_memory(args) -> int:
             store.add(vector, Memory(case["id"], state, decisions, meta={"workflow": case["workflow"]}))
             if number % 100 == 0 or number == len(cases):
                 print(f"{number}/{len(cases)} ricordi", file=sys.stderr)
+        store.model = scorer.model_id
         store.save(args.memory)
         print(f"archivio {args.memory}: {len(store)} ricordi")
         return 0
-    store = MemoryStore.load(args.memory)
+    store = _memory(args, scorer)
     vector = scorer.analyze_state(state, image_max_side=args.image_max_side)[0]["embedding"]
     if args.action == "add":
         decisions = json.loads(args.decisions) if args.decisions else {}
@@ -332,6 +348,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="egeria", description="Modello decisionale System 1 su Qwen3.5")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def share_state_arg(p):
+        p.add_argument("--share-state", default="auto", choices=["auto", "always", "never"],
+                       help="riuso dello stato: prefisso (istruzioni + stato) calcolato una volta per tutte le domande")
+
     def model_args(p):
         p.add_argument("--model", default=DEFAULT_MODEL)
         p.add_argument("--device", default="cuda", help="cuda oppure cpu (su cpu usare --dtype float32)")
@@ -341,6 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--batch-tokens", type=int, default=12288)
         p.add_argument("--permutations", type=int, default=1)
         p.add_argument("--vision", action="store_true", help="carica il modello con la torre visiva (stati con immagini)")
+        share_state_arg(p)
 
     sub.add_parser("info", help="ambiente, GPU e kernel veloci").set_defaults(func=cmd_info)
 
@@ -399,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     p.add_argument("--quantize", default=None, choices=["4bit"])
     p.add_argument("--text-only", action="store_true", help="senza torre visiva (niente immagini)")
+    share_state_arg(p)
     p.add_argument("--temperatures", help="file delle temperature (calibrazione, mai applicata alle immagini)")
     p.add_argument("--permutations", type=int, default=2)
     p.add_argument("--min-confidence", type=float, default=0.5, help="soglia di default sotto cui una risposta è 'incerta'")

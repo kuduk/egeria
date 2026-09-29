@@ -279,6 +279,26 @@ def test_questions_required_and_state_validation():
             parse_state(state)
 
 
+def test_state_reuse_policy():
+    """Modalità auto: si condivide il prefisso solo oltre la soglia misurata per dispositivo e taglia."""
+    from types import SimpleNamespace
+
+    from egeria.scorer import DecisionScorer
+
+    scorer = DecisionScorer.__new__(DecisionScorer)  # senza caricare un modello
+    scorer.share_state, scorer.body_parameters = "auto", 0.8e9
+    scorer.device = SimpleNamespace(type="cuda")
+    assert not scorer._worth_sharing(300, 3) and scorer._worth_sharing(300, 5)  # 600 e 1200 token evitati
+    scorer.body_parameters = 1.9e9
+    assert scorer._worth_sharing(300, 3)
+    scorer.device = SimpleNamespace(type="cpu")
+    assert scorer._worth_sharing(50, 2)
+    scorer.share_state = "never"
+    assert not scorer._worth_sharing(5000, 10)
+    scorer.share_state = "always"
+    assert scorer._worth_sharing(10, 2) and not scorer._worth_sharing(0, 2)
+
+
 def test_number_answers():
     number = _one({"type": "number", "instructions": "x", "criteria": [0, 10, 20]})
     result = answer(number, [0.5, 0.5])
@@ -314,6 +334,42 @@ def test_memory_store_search_save_load(tmp_path):
     assert len(again) == 3 and again.items[1].note == "confermato" and again.items[1].decisions == {"q": "y"}
     with pytest.raises(ValueError):
         store.add([0.0, 0.0, 1.0], Memory("a", "doppione"))
+
+
+def test_memory_store_follows_the_model(tmp_path):
+    """L'archivio registra il modello; con un altro modello i vettori si ricalcolano dagli stati."""
+    import json
+
+    from egeria.memory import Memory, MemoryStore, ensure_model
+
+    store = MemoryStore()
+    store.add([1.0, 0.0, 0.0], Memory("a", "stato a", {"q": "x"}))
+    store.add([0.0, 1.0, 0.0], Memory("b", [{"type": "image", "path": "sparita.jpg"}]))
+
+    def embed(state):
+        if isinstance(state, list):
+            raise RequestError("immagine non leggibile")
+        return [1.0, 0.0]
+
+    assert ensure_model(store, "m1", 3, embed)["action"] == "adopted" and store.model == "m1"
+    assert ensure_model(store, "m1", 3, embed)["action"] == "none"
+    report = ensure_model(store, "m2", 2, embed)  # altro modello, vettori da 2
+    assert report == {"action": "reforged", "model": "m2", "reforged": 1, "suspended": 1}
+    assert store.dim == 2 and [item.id for item in store.items] == ["a"]
+    store.save(tmp_path / "m")
+    again = MemoryStore.load(tmp_path / "m")
+    assert again.model == "m2" and again.suspended_count == 1 and len(again) == 1
+    suspended = json.loads((tmp_path / "m" / "memories-sospese.jsonl").read_text().splitlines()[0])
+    assert suspended["memory"]["id"] == "b" and "non leggibile" in suspended["reason"]
+    with pytest.raises(ValueError):
+        again.add([1.0, 0.0, 0.0], Memory("c", "vettore di un altro modello"))
+
+    def down(state):
+        raise RuntimeError("il modello non risponde")
+
+    with pytest.raises(RuntimeError):
+        ensure_model(again, "m3", 2, down)
+    assert again.model == "m2" and len(again) == 1  # archivio invariato
 
 
 def test_memory_options():

@@ -42,8 +42,10 @@ class ModelClient:
     def decide(self, body: dict) -> dict:
         return self._call("POST", "/v1/systemone", body)
 
-    def embed(self, state, image_max_side: int | None = None) -> np.ndarray:
+    def embed(self, state, image_max_side: int | None = None) -> tuple[np.ndarray, str | None]:
+        """Vettore dello stato e modello che l'ha calcolato (per tenere coerente l'archivio dei ricordi)."""
         body = {"state": state}
         if image_max_side:
             body["image_max_side"] = image_max_side
-        return np.asarray(self._call("POST", "/v1/embed", body)["embedding"], dtype=np.float32)
+        result = self._call("POST", "/v1/embed", body)
+        return np.asarray(result["embedding"], dtype=np.float32), result.get("model")

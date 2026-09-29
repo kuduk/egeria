@@ -1,0 +1,38 @@
+# Test automatici: sulle pull request verso main e develop, e dopo ogni merge (push) su main e develop.
+# Girano senza torch né modello: i test d'integrazione con il modello (tests/test_scorer.py) si saltano
+# da soli se EGERIA_TEST_MODEL non è impostata.
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Ambiente Python 3.12
+        run: uv venv --python 3.12 .venv
+
+      - name: Installazione (pacchetto, server web e strumenti di test)
+        run: uv pip install --python .venv/bin/python -e ".[dev,server]"
+
+      - name: Test
+        run: .venv/bin/pytest -q

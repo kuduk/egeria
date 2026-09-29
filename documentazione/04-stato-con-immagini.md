@@ -109,7 +109,7 @@ Le risposte sono identiche e le probabilità coincidono entro il rumore bf16.
 
 **Cosa emerge:**
 - **Con immagini piccole la ripetizione costa poco.** Sul 0.8B a 224 px le 2 domande in più, immagine compresa, costano 9 ms (42 → 51 ms). La variante condivisa fa **due passaggi in sequenza** (prefisso, poi code), quindi paga due volte il costo fisso per passaggio, circa 35–40 ms di piccoli kernel sul 0.8B.
-- **Con immagini grandi o più domande la condivisione vince nettamente**, fino a −58%, perché ogni domanda in più costa solo la sua coda. Lo scorer multimodale dovrà scegliere la strategia in base a token visivi × domande.
+- **Con immagini grandi o più domande la condivisione vince nettamente**, fino a −58%, perché ogni domanda in più costa solo la sua coda. Dal 29/09/2026 lo scorer sceglie da solo, in base ai token evitati: con le immagini della suite il tempo scende fino all'80% ([08-riuso-dello-stato.md](08-riuso-dello-stato.md)).
 - **Il vero limite è il costo fisso per passaggio**: 42 ms per una domanda sul 0.8B, di cui solo 8 ms di torre visiva.
 
 **Prossimi passi per il tempo reale:**
@@ -126,7 +126,7 @@ Le risposte sono identiche e le probabilità coincidono entro il rumore bf16.
 - **Tipi di domanda supportati:** `noul`, `choice`, `score`, `number` e `open`, con le permutazioni e `min_confidence` (sotto la soglia la risposta è `uncertain`).
 - **La memoria e il vettore dello stato (`/v1/embed`) funzionano anche con le immagini:** il vettore include i token visivi. Verifica: 5/6 in [06-memoria.md](06-memoria.md) §6.
 - **`open` (una parola o un valore) funziona anche con le immagini** e legge date, importi e codici (§7).
-- **Efficienza.** Il prompt con l'immagine si ripete per ogni domanda e permutazione. Con immagini piccole costa poco; con immagini grandi conviene il prefisso condiviso (§4), che è da integrare.
+- **Efficienza.** Dal 29/09/2026 istruzioni e immagini si calcolano una volta sola per tutte le domande e permutazioni, quando conviene (modalità `auto`, [08-riuso-dello-stato.md](08-riuso-dello-stato.md)). Con immagini piccole e poche domande resta il prompt intero per ogni domanda, che lì costa meno.
 
 ## 6. Esempi d'uso
 

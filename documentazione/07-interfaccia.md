@@ -22,7 +22,7 @@ uv pip install --python .venv/bin/python -e ".[model,eval,vision,server]"   # so
 Poi, nel browser (anche da Windows, se il server gira in WSL): **http://localhost:8000/**.
 
 - **Ordine di avvio:** indifferente. Se il modello non risponde, l'interfaccia lo segnala in alto ("Modello non raggiungibile") e alla prima domanda dice come avviarlo. Storico e ricordi restano consultabili.
-- **Cambiare modello senza chiudere l'interfaccia:** si ferma e si riavvia solo `model-server`, per esempio con `--model Qwen/Qwen3.5-0.8B-Base`. Storico e ricordi non cambiano.
+- **Cambiare modello senza chiudere l'interfaccia:** si ferma e si riavvia solo `model-server`, per esempio con `--model Qwen/Qwen3.5-0.8B-Base`. Storico e ricordi non cambiano: alla prima domanda con i ricordi, i loro vettori si ricalcolano per il nuovo modello ([06-memoria.md](06-memoria.md) §5).
 - **Per fermarli:** `Ctrl+C` in ciascun terminale. Se sono stati avviati in background:
   - `pgrep -f '^/home/kuduk/egeria/.venv/bin/python .venv/bin/egeria model-server' | xargs kill`
   - `pgrep -f '^/home/kuduk/egeria/.venv/bin/python .venv/bin/egeria serve' | xargs kill`
@@ -50,7 +50,7 @@ browser ──HTTP──▶ egeria serve (porta 8000)            ──HTTP─�
 | Dipendenze | torch, transformers, GPU | fastapi, uvicorn, httpx, numpy: **niente torch** |
 | Stato | nessuno | `runs/console/`, `runs/memoria-console/` |
 | Porta di default | 8100 | 8000 |
-| Si riavvia per | cambiare modello, calibrazione, permutazioni | aggiornare l'interfaccia |
+| Si riavvia per | cambiare modello, calibrazione, permutazioni, riuso dello stato (`--share-state`, [08](08-riuso-dello-stato.md)) | aggiornare l'interfaccia |
 
 **Come passa una domanda:**
 1. Il server web valida la richiesta e, se lo stato contiene immagini indicate con un percorso, le legge e le trasforma in base64. Accetta solo file dentro il progetto o dentro la cartella dei dati.
@@ -64,7 +64,7 @@ browser ──HTTP──▶ egeria serve (porta 8000)            ──HTTP─�
 |---|---|---|
 | `GET /v1/info` | | modello, dispositivo, GPU, parte visiva, permutazioni, soglia di default, calibrazione |
 | `POST /v1/systemone` | body Jev (`state`, `questions`, `min_confidence`, `image_max_side`) più `permutations` (1–8) e `calibrated` (`false` = probabilità grezze) | risposta Jev con le estensioni Egeria |
-| `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (normalizzato L2), `embedding_dim`, `input_tokens`, `latency_ms` |
+| `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (normalizzato L2), `embedding_dim`, `model` (il modello che l'ha calcolato), `input_tokens`, `latency_ms` |
 
 Esempio, direttamente sul server del modello:
 
@@ -175,7 +175,7 @@ Le impostazioni restano nel browser.
 | Metodo e percorso | Uso |
 |---|---|
 | `POST /v1/systemone` | API compatibile Jev, con le estensioni Egeria **e i ricordi** (`memory.recall`, `memory.min_similarity`, `memory.vote`) |
-| `GET /api/info` | modello e stato del server del modello (`model_status`: `ok` o `non_raggiungibile`), numero di ricordi e di analisi |
+| `GET /api/info` | modello e stato del server del modello (`model_status`: `ok` o `non_raggiungibile`), numero di ricordi e di analisi, modello dei vettori dei ricordi (`memory_model`) e ricordi sospesi (`memories_suspended`) |
 | `GET /api/cases?view=da_rivedere\|tutti` | storico |
 | `POST /api/cases` | `{"request": <body /v1/systemone>}`: analizza e salva nello storico |
 | `GET /api/cases/{id}`, `POST /api/cases/{id}/review` | dettaglio; salvataggio nei ricordi con `{"decisions": {...}, "note": ...}` |
@@ -214,6 +214,7 @@ I test automatici ([tests/test_server.py](../tests/test_server.py)) fanno parlar
 ## 9. Scelte di progetto
 
 - **Nessuna build:** HTML, CSS e JS statici serviti da FastAPI. Il DOM si costruisce solo con `textContent` (niente XSS).
+- **Video da file, in modalità dal vivo:** si accettano solo MP4, WebM, Ogg, MOV e MKV. Il file diventa un URL `blob:` con il tipo preso da una tabella fissa (non dal file), e l'URL precedente si libera quando si cambia video. Così si è risolto il 29/09/2026 l'avviso di CodeQL `js/xss-through-dom`, verificato in locale con CodeQL 2.27.1: zero avvisi con la suite di code scanning e con `security-extended`.
 - **Stile:** tema scuro o chiaro, Fira Sans/Fira Code, icone SVG.
   - **Logo:** [img/logo.png](../src/egeria/web/img/logo.png). Nella barra in alto c'è l'emblema su un riquadro chiaro arrotondato, uguale nei due temi, accanto al nome in maiuscolo spaziato come nella scritta del logo. Il riquadro chiaro serve perché il volto è disegnato con il bianco del fondo: su uno sfondo scuro l'emblema diventerebbe un negativo.
   - **Immagini derivate:** emblema, favicon, icona per iPhone e le due anteprime social 1280×640 per GitHub (logo centrato, oppure emblema e scritta affiancati) si generano con `.venv/bin/python scripts/genera_icone.py`, da rilanciare se cambia il logo.

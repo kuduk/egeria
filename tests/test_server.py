@@ -24,6 +24,8 @@ class FakeScorer:
     Ricorda ogni chiamata, per verificare che cosa il server web manda al modello.
     """
 
+    model_id = "finto"
+
     def __init__(self):
         self.calls = []
 
@@ -213,6 +215,36 @@ def test_web_handles_memory(client, scorer):
     # senza memory.recall la memoria non viene consultata
     plain = client.post("/v1/systemone", json={"state": "bonifico respinto", "questions": QUESTIONS}).json()
     assert "memories" not in plain and "memory" not in plain["answers"]["reparto"]
+
+
+def test_memory_built_with_another_model_is_reforged(tmp_path, monkeypatch):
+    """Archivio creato con un altro modello (vettori da 8): niente errore 500, i vettori si ricalcolano."""
+    import json
+
+    import egeria.server as server
+    from egeria.memory import Memory, MemoryStore
+
+    monkeypatch.setattr(server, "PROJECT_ROOT", tmp_path)
+    old = MemoryStore()
+    old.model = "altro-modello"
+    old.add(np.ones(8), Memory("bonifico", "bonifico respinto", {"reparto": "tecnico"}))
+    old.add(np.ones(8), Memory("foto", [{"type": "image", "path": "dati/media/cancellata.jpg"}], {"reparto": "tecnico"}))
+    old.save(tmp_path / "memoria")
+
+    engine = Engine(model_client(FakeScorer()), tmp_path / "memoria", tmp_path / "dati")
+    web = TestClient(create_app(engine, {"model_url": "http://modello"}))
+    response = web.post("/v1/systemone", json={"state": "bonifico respinto", "questions": QUESTIONS,
+                                               "memory": {"recall": 1}})
+    assert response.status_code == 200
+    assert response.json()["memories"][0]["id"] == "bonifico"
+    assert response.json()["memories"][0]["similarity"] == pytest.approx(1.0)
+    info = web.get("/api/info").json()
+    assert info["memory_model"] == "finto" and info["memories"] == 1 and info["memories_suspended"] == 1
+    saved = json.loads((tmp_path / "memoria" / "store.json").read_text())
+    assert saved == {"model": "finto", "dim": 16}
+    # il ricordo con l'immagine cancellata non è perso: è fra i sospesi
+    suspended = json.loads((tmp_path / "memoria" / "memories-sospese.jsonl").read_text().splitlines()[0])
+    assert suspended["memory"]["id"] == "foto"
 
 
 def test_web_sends_images_inline(client, scorer, tmp_path):
