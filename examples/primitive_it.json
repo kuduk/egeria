@@ -11,7 +11,7 @@
       }
     },
     "giorni": {
-      "type": "number",
+      "type": "estimate",
       "instructions": "Da quanti giorni falliscono i pagamenti?",
       "criteria": {
         "bins": [
@@ -26,12 +26,12 @@
       }
     },
     "lingua": {
-      "type": "open",
+      "type": "short_answer",
       "instructions": "In che lingua è scritto il messaggio?",
       "top_k": 3
     },
     "oggetto": {
-      "type": "open",
+      "type": "short_answer",
       "instructions": "Qual è l'argomento principale, in una parola?",
       "top_k": 3
     }

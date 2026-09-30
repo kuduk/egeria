@@ -22,6 +22,22 @@ def log_softmax(logits) -> np.ndarray:
     return z - np.log(np.exp(z).sum())
 
 
+def yes_bias_shift(empty_logprobs) -> float:
+    """Quanto la domanda Sì/No pende verso il Sì sullo stato vuoto, in logit; mai negativo.
+
+    `empty_logprobs` sono le log-prob [Sì, No] della stessa domanda sullo stato "N/A". Se lo stato
+    vuoto pende verso il No non c'è niente da correggere: senza informazioni "No" è la risposta
+    giusta, e togliere quello spostamento creerebbe falsi allarmi sugli eventi rari
+    (documentazione/09-controlli-senza-etichette.md §9).
+    """
+    return max(0.0, float(empty_logprobs[0] - empty_logprobs[1]))
+
+
+def remove_yes_shift(logprobs, shift: float) -> np.ndarray:
+    """Log-prob [Sì, No] con `shift` tolto dal logit del Sì."""
+    return log_softmax(np.asarray(logprobs, dtype=np.float64) - np.array([shift, 0.0]))
+
+
 def choice_confidence(probabilities) -> float:
     p = np.asarray(probabilities, dtype=np.float64)
     n = len(p)
@@ -46,7 +62,7 @@ def decision_confidence(qtype: str, probabilities) -> float:
     basata sulla distanza dalla moda. Per noul si usa la formula di choice con n = 2,
     cioè 2·p_max − 1. È la quantità confrontata con `min_confidence`.
     """
-    if qtype in ("score", "number"):
+    if qtype in ("score", "estimate"):
         return score_confidence(probabilities)
     return choice_confidence(probabilities)
 
@@ -66,8 +82,8 @@ def answer(question, probabilities) -> dict:
             "probabilities": rounded,
             "confidence": round(choice_confidence(p), 6),
         }
-    if question.type == "number":
-        return number_answer(question, p)
+    if question.type == "estimate":
+        return estimate_answer(question, p)
     return {
         "type": "score",
         "score": round(float((np.arange(len(p)) * p).sum()), 6),
@@ -95,13 +111,13 @@ def _quantile(p: np.ndarray, bounds: list[tuple[float, float]], q: float) -> flo
     return float(bounds[-1][1])
 
 
-def number_answer(question, probabilities) -> dict:
+def estimate_answer(question, probabilities) -> dict:
     """Stima numerica da una distribuzione sugli intervalli: valore atteso e intervallo 10–90%."""
     p = np.asarray(probabilities, dtype=np.float64)
     bounds = _bin_bounds(question.params["edges"])
     midpoints = np.array([(lo + hi) / 2 for lo, hi in bounds])
     result = {
-        "type": "number",
+        "type": "estimate",
         "value": round(float((p * midpoints).sum()), 6),
         "interval": [round(_quantile(p, bounds, 0.1), 6), round(_quantile(p, bounds, 0.9), 6)],
         "range": question.keys[int(p.argmax())],
@@ -129,6 +145,6 @@ def merge_candidates(candidates: list[tuple[str, float]], top_k: int) -> list[di
     return [{"text": text, "p": round(float(prob), 6)} for text, prob in ranked]
 
 
-def open_answer(candidates: list[dict]) -> dict:
+def short_answer(candidates: list[dict]) -> dict:
     top = candidates[0] if candidates else {"text": "", "p": 0.0}
-    return {"type": "open", "answer": top["text"], "candidates": candidates, "confidence": top["p"]}
+    return {"type": "short_answer", "answer": top["text"], "candidates": candidates, "confidence": top["p"]}

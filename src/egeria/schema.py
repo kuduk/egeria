@@ -5,8 +5,9 @@ Una richiesta ha uno `state` (stringa, oggetto o array JSON) e una mappa
 del tipo, `criteria`.
 
 Tipi di Jev: noul, choice, score. Estensioni Egeria (senza training):
-- number: stima numerica a intervalli (valore atteso + intervallo);
-- open: risposta di una parola dall'intero vocabolario.
+- estimate: stima di una quantità a intervalli (valore atteso + intervallo);
+- short_answer: risposta breve (una parola, un nome, un numero, una data) dall'intero vocabolario.
+Fino al 29/09/2026 si chiamavano `number` e `open`: i vecchi nomi sono ancora accettati.
 
 Altre estensioni: `min_confidence` per domanda o globale (sotto la soglia la risposta è
 `uncertain`); `memory` a livello di richiesta (ricordi simili e voto dei ricordi);
@@ -20,9 +21,11 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-QUESTION_TYPES = ("noul", "choice", "score", "number", "open")
+QUESTION_TYPES = ("noul", "choice", "score", "estimate", "short_answer")
+# Nomi usati fino al 29/09/2026, accettati come sinonimi (storico, ricordi, richieste già scritte).
+TYPE_ALIASES = {"number": "estimate", "open": "short_answer"}
 # Readout usato per ogni tipo: temperature, ordinamenti e formula di confidenza.
-READOUT = {"noul": "noul", "choice": "choice", "score": "score", "number": "score", "open": "open"}
+READOUT = {"noul": "noul", "choice": "choice", "score": "score", "estimate": "score", "short_answer": "short_answer"}
 # Il readout usa una lettera maiuscola per opzione, ognuna un singolo token.
 MAX_OPTIONS = 26
 MAX_SCORE_LEVELS = 10
@@ -111,8 +114,13 @@ def _interval_text(lo: float | None, hi: float | None, unit: str) -> str:
     return f"from {_number(lo)} to {_number(hi)}{suffix}"
 
 
-def _number_edges(qid: str, criteria: Any) -> tuple[list[float | None], str]:
-    """`criteria` di number: lista di estremi crescenti, oppure {"bins": [...], "unit": "..."}.
+def canonical_type(qtype: Any) -> Any:
+    """Tipo di domanda con i nomi attuali: `number` → `estimate`, `open` → `short_answer`."""
+    return TYPE_ALIASES.get(qtype, qtype) if isinstance(qtype, str) else qtype
+
+
+def _estimate_edges(qid: str, criteria: Any) -> tuple[list[float | None], str]:
+    """`criteria` di estimate: lista di estremi crescenti, oppure {"bins": [...], "unit": "..."}.
 
     Il primo estremo può essere null (aperto in basso), l'ultimo null (aperto in alto).
     """
@@ -138,7 +146,7 @@ def _number_edges(qid: str, criteria: Any) -> tuple[list[float | None], str]:
 def parse_question(qid: str, body: Any, default_min_confidence: float | None = None) -> Question:
     if not isinstance(body, dict):
         raise RequestError(f"domanda {qid!r}: deve essere un oggetto")
-    qtype = body.get("type")
+    qtype = canonical_type(body.get("type"))
     if qtype not in QUESTION_TYPES:
         raise RequestError(f"domanda {qid!r}: type deve essere uno di {QUESTION_TYPES}")
     instructions = body.get("instructions")
@@ -173,15 +181,15 @@ def parse_question(qid: str, body: Any, default_min_confidence: float | None = N
             Option(str(level), _description(value, f"domanda {qid!r}, livello {level}"))
             for level, value in enumerate(criteria)
         )
-    elif qtype == "number":
-        edges, unit = _number_edges(qid, criteria)
+    elif qtype == "estimate":
+        edges, unit = _estimate_edges(qid, criteria)
         params = {"edges": edges, "unit": unit}
         options = tuple(
             Option(_interval_key(lo, hi), _interval_text(lo, hi, unit)) for lo, hi in zip(edges[:-1], edges[1:])
         )
-    else:  # open
+    else:  # short_answer
         if criteria is not None:
-            raise RequestError(f"domanda {qid!r}: open non ammette criteria")
+            raise RequestError(f"domanda {qid!r}: short_answer non ammette criteria")
         top_k = body.get("top_k", 5)
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= MAX_TOP_K:
             raise RequestError(f"domanda {qid!r}: top_k deve essere un intero fra 1 e {MAX_TOP_K}")

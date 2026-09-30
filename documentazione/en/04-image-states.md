@@ -123,9 +123,9 @@ The answers are identical and the probabilities match within bf16 noise.
 - **State.** It is a **list of parts**: `{"type": "text", "text": ...}` and `{"type": "image", "path" | "url" | "base64": ...}`. Multiple images are allowed and their order is preserved in the prompt.
 - **`image_max_side`** (optional, 64–4096): downscales the images, so the number of visual tokens and the latency go down (§4).
 - **Model loading.** `egeria decide` detects images in the state and loads the full model with the vision tower on its own (`--vision` forces it). Memory for the 2B in bf16 is 4.4 GB.
-- **Supported question types:** `noul`, `choice`, `score`, `number` and `open`, with permutations and `min_confidence` (below the threshold the answer is `uncertain`).
+- **Supported question types:** `noul`, `choice`, `score`, `estimate` and `short_answer`, with permutations and `min_confidence` (below the threshold the answer is `uncertain`).
 - **Memory and the state vector (`/v1/embed`) also work with images:** the vector includes the visual tokens. Check: 5/6 in [06-memory.md](06-memory.md) §6.
-- **`open` (one word or a value) also works with images** and reads dates, amounts and codes (§7).
+- **`short_answer` (a short answer: one word or a value) also works with images** and reads dates, amounts and codes (§7).
 - **Efficiency.** Since 29/09/2026 the instructions and images are computed once for all questions and permutations, when it pays off (`auto` mode, [08-state-reuse.md](08-state-reuse.md)). With small images and few questions each question keeps its full prompt, which is cheaper there.
 
 ## 6. Usage examples
@@ -234,9 +234,9 @@ A test on a photographed **identity card** (the personal data is not reported he
 | "Vi è una persona nella foto?" ("Is there a person in the photo?") | Yes/No | ✅ Yes, 93–94% |
 | "È un documento di identità?" ("Is it an identity document?") | Yes/No | ✅ Yes, 94–95% |
 | Year of birth (choice among nearby years) | choice | ✅ correct, 99% |
-| Date of birth | value (`open`) | ✅ read in full, 92% at 448 px, 97% at 896 px |
-| Expiry date | value (`open`) | ✅ read in full, 98–99% |
-| Receipt total | value (`open`) | ✅ "14,21", 98–99% |
+| Date of birth | value (`short_answer`) | ✅ read in full, 92% at 448 px, 97% at 896 px |
+| Expiry date | value (`short_answer`) | ✅ read in full, 98–99% |
+| Receipt total | value (`short_answer`) | ✅ "14,21", 98–99% |
 | "La persona ha più di 21 anni?" ("Is the person over 21?") | Yes/No | ❌ No at 31% (448 px); 50% at 896 px |
 | Same question, with today's date in the text | Yes/No | ⚠️ 57–62% |
 | "È nata prima del 2005?" ("Was she born before 2005?") | Yes/No | ❌ No at 39%, even though it reads the year correctly |
@@ -249,9 +249,9 @@ A test on a photographed **identity card** (the personal data is not reported he
 
 This is the same limitation documented for Jev (dates, arithmetic).
 
-**Rule of thumb:** ask the model for the **value** ("Qual è la data di nascita?" ("What is the date of birth?"), question type *Una parola o un valore* ("One word or a value")) and do the comparison in code or by hand. To read small text, use the *Massima* ("Maximum") image quality (896 px).
+**Rule of thumb:** ask the model for the **value** ("Qual è la data di nascita?" ("What is the date of birth?"), question type *Una risposta breve* ("A short answer")) and do the comparison in code or by hand. To read small text, use the *Massima* ("Maximum") image quality (896 px).
 
 **Fixes made after this test:**
-- *Una parola o un valore* now also works with images.
+- *Una risposta breve* now also works with images.
 - Reading no longer stops at punctuation: the completion continues up to the first space, within 16 tokens, because the Qwen tokenizer splits digits one by one.
 - Calibration is no longer applied to images, and the server does not use it by default. With the calibration fitted on the text tickets, "Vi è una persona nella foto?" dropped to 59%.

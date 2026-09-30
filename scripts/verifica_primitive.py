@@ -3,6 +3,7 @@
     .venv/bin/python scripts/verifica_primitive.py Qwen/Qwen3.5-2B-Base
 
 Si tiene una primitiva solo se supera la sua soglia (documentazione/05-primitive-di-lettura.md).
+`estimate` e `short_answer` si chiamavano `number` e `open` fino al 29/09/2026.
 `surprise` (perplessità dello stato come segnale di anomalia) non ha superato la verifica
 (AUROC 0.50 su 6 testi normali contro 6 anomali) ed è stata tolta.
 """
@@ -74,26 +75,26 @@ def main() -> None:
 
     ok = 0
     for state, question, edges, unit, expected in NUMBER:
-        result = scorer.decide({"state": state, "questions": {"q": {"type": "number", "instructions": question,
+        result = scorer.decide({"state": state, "questions": {"q": {"type": "estimate", "instructions": question,
                                                                       "criteria": {"bins": edges, "unit": unit}}}},
                                permutations=2)["answers"]["q"]
         ok += result["range"] == expected
-        print(f"number {'✓' if result['range'] == expected else '✗'} {question[:45]:45s} -> {result['range']:10s} "
+        print(f"estimate {'✓' if result['range'] == expected else '✗'} {question[:45]:45s} -> {result['range']:10s} "
               f"(atteso {expected}, valore {result['value']:.1f})")
-    report["number"] = (ok, len(NUMBER), ok >= 4)
+    report["estimate"] = (ok, len(NUMBER), ok >= 4)
 
     ok = 0
     for state, question, accepted in OPEN:
-        result = scorer.decide({"state": state, "questions": {"q": {"type": "open", "instructions": question,
+        result = scorer.decide({"state": state, "questions": {"q": {"type": "short_answer", "instructions": question,
                                                                       "top_k": 3}}})["answers"]["q"]
         good = normalize(result["answer"]) in accepted
         ok += good
-        print(f"open   {'✓' if good else '✗'} {question[:45]:45s} -> {result['answer']!r} (p={result['confidence']:.2f})")
-    report["open"] = (ok, len(OPEN), ok >= 5)
+        print(f"short_answer {'✓' if good else '✗'} {question[:45]:45s} -> {result['answer']!r} (p={result['confidence']:.2f})")
+    report["short_answer"] = (ok, len(OPEN), ok >= 5)
 
     print("\nesito:")
     for name, (value, total, passed) in report.items():
-        print(f"  {name:8s} {value}/{total}  {'TENERE' if passed else 'TOGLIERE'}")
+        print(f"  {name:12s} {value}/{total}  {'TENERE' if passed else 'TOGLIERE'}")
 
 
 if __name__ == "__main__":

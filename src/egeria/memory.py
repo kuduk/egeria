@@ -234,17 +234,19 @@ def ensure_model(store: MemoryStore, model: str | None, dim: int, embed) -> dict
 def decisions_from_answers(answers: dict) -> dict[str, str]:
     """Riassunto testuale delle risposte di `decide`, per salvarle come ricordo."""
     summary = {}
+    from .schema import canonical_type
+
     for qid, result in answers.items():
-        kind = result.get("type")
+        kind = canonical_type(result.get("type"))
         if kind == "noul":
             summary[qid] = "true" if result["noul"] >= 0.5 else "false"
         elif kind == "choice":
             summary[qid] = result["choice"]
         elif kind == "score":
             summary[qid] = f"level {round(result['score'])}"
-        elif kind == "number":
+        elif kind == "estimate":
             summary[qid] = f"{result['value']:g}"
-        elif kind == "open":
+        elif kind == "short_answer":
             summary[qid] = result["answer"]
     return summary
 
@@ -270,7 +272,7 @@ def memory_votes(questions, found, smoothing: float = VOTE_SMOOTHING) -> dict[st
     """
     votes = {}
     for question in questions:
-        if question.type == "open":
+        if question.type == "short_answer":
             continue
         hits = [(score, memory_key(question, item.decisions.get(question.id))) for score, item in found]
         hits = [(score, key) for score, key in hits if key is not None]

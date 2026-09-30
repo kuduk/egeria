@@ -72,6 +72,15 @@ Result with `auto`, relative to full prompts (median):
 | 2B-Base | 1.00 (no loss) | **0.39** (down to 0.20) |
 | 0.8B-Base | 1.01 | **0.61** (down to 0.24) |
 
+**Realistic text workload: typed-decisions.** 40 test cases, 5 questions each, 2 permutations, 2B on GPU, two runs per mode (`egeria predict --limit 40 --share-state never|auto`):
+
+| | Full prompts | `auto` |
+|---|---|---|
+| Time per case | 500–516 ms | **233–247 ms** (−53%, about twice as fast) |
+| Same answers | – | 197/200 |
+
+The 3 different answers were near ties: for example 0.288 vs 0.281 for the top two options. bf16 noise tips them one way or the other. Here the prompts are long (~720 tokens per question) and there are many questions, so `auto` shares the prefix on text too.
+
 The thresholds were measured on a single GPU (RTX 4070 Laptop). On different hardware the break-even point may move: the script measures it again.
 
 ## 5. Usage
@@ -89,6 +98,6 @@ CUDA_VISIBLE_DEVICES= .venv/bin/python scripts/bench_riuso_stato.py Qwen/Qwen3.5
 
 ## 6. What is left out
 
-- **`open` questions** still each do their own full pass: first the whole prompt, then the candidates are completed. They could start from the same prefix cache.
+- **`short_answer` questions** still each do their own full pass: first the whole prompt, then the candidates are completed. They could start from the same prefix cache.
 - **The state vector for memory** (`/v1/embed`) is a separate pass over the same state. The web server asks for it before the decision, in two separate HTTP calls.
 - **The fixed cost per pass** remains the limit on short texts on GPU. It is what CUDA graphs would address ([04-image-states.md](04-image-states.md) §4).

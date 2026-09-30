@@ -123,9 +123,9 @@ Le risposte sono identiche e le probabilità coincidono entro il rumore bf16.
 - **Stato.** È una **lista di parti**: `{"type": "text", "text": ...}` e `{"type": "image", "path" | "url" | "base64": ...}`. Più immagini sono ammesse e il loro ordine viene rispettato nel prompt.
 - **`image_max_side`** (opzionale, 64–4096): riduce le immagini, così i token visivi calano e la latenza scende (§4).
 - **Caricamento del modello.** `egeria decide` riconosce le immagini nello stato e carica da solo il modello completo con la torre visiva (`--vision` lo forza). La memoria del 2B in bf16 è 4.4 GB.
-- **Tipi di domanda supportati:** `noul`, `choice`, `score`, `number` e `open`, con le permutazioni e `min_confidence` (sotto la soglia la risposta è `uncertain`).
+- **Tipi di domanda supportati:** `noul`, `choice`, `score`, `estimate` e `short_answer`, con le permutazioni e `min_confidence` (sotto la soglia la risposta è `uncertain`).
 - **La memoria e il vettore dello stato (`/v1/embed`) funzionano anche con le immagini:** il vettore include i token visivi. Verifica: 5/6 in [06-memoria.md](06-memoria.md) §6.
-- **`open` (una parola o un valore) funziona anche con le immagini** e legge date, importi e codici (§7).
+- **`short_answer` (una risposta breve: una parola o un valore) funziona anche con le immagini** e legge date, importi e codici (§7).
 - **Efficienza.** Dal 29/09/2026 istruzioni e immagini si calcolano una volta sola per tutte le domande e permutazioni, quando conviene (modalità `auto`, [08-riuso-dello-stato.md](08-riuso-dello-stato.md)). Con immagini piccole e poche domande resta il prompt intero per ogni domanda, che lì costa meno.
 
 ## 6. Esempi d'uso
@@ -234,9 +234,9 @@ Una prova su una **carta d'identità** fotografata (i dati personali non sono ri
 | "Vi è una persona nella foto?" | Sì/No | ✅ Sì, 93–94% |
 | "È un documento di identità?" | Sì/No | ✅ Sì, 94–95% |
 | Anno di nascita (scelta fra anni vicini) | scelta | ✅ corretto, 99% |
-| Data di nascita | valore (`open`) | ✅ letta per intero, 92% a 448 px, 97% a 896 px |
-| Data di scadenza | valore (`open`) | ✅ letta per intero, 98–99% |
-| Totale dello scontrino | valore (`open`) | ✅ "14,21", 98–99% |
+| Data di nascita | valore (`short_answer`) | ✅ letta per intero, 92% a 448 px, 97% a 896 px |
+| Data di scadenza | valore (`short_answer`) | ✅ letta per intero, 98–99% |
+| Totale dello scontrino | valore (`short_answer`) | ✅ "14,21", 98–99% |
 | "La persona ha più di 21 anni?" | Sì/No | ❌ No al 31% (448 px); 50% a 896 px |
 | Stessa domanda, con la data di oggi nel testo | Sì/No | ⚠️ 57–62% |
 | "È nata prima del 2005?" | Sì/No | ❌ No al 39%, pur leggendo correttamente l'anno |
@@ -249,9 +249,9 @@ Una prova su una **carta d'identità** fotografata (i dati personali non sono ri
 
 È lo stesso limite documentato per Jev (date, aritmetica).
 
-**Regola pratica:** si chiede al modello il **valore** ("Qual è la data di nascita?", tipo *Una parola o un valore*) e il confronto si fa nel codice o a mano. Per leggere testi piccoli conviene la qualità immagine *Massima* (896 px).
+**Regola pratica:** si chiede al modello il **valore** ("Qual è la data di nascita?", tipo *Una risposta breve*) e il confronto si fa nel codice o a mano. Per leggere testi piccoli conviene la qualità immagine *Massima* (896 px).
 
 **Correzioni fatte dopo questa prova:**
-- *Una parola o un valore* ora funziona anche con le immagini.
+- *Una risposta breve* ora funziona anche con le immagini.
 - La lettura non si ferma più alla punteggiatura: il completamento prosegue fino al primo spazio, entro 16 token, perché il tokenizer di Qwen spezza le cifre una per una.
 - La calibrazione non viene più applicata alle immagini, e il server di default non la usa. Con quella dei ticket di testo, "Vi è una persona nella foto?" scendeva al 59%.

@@ -2,12 +2,12 @@
   "state": "Buongiorno, sono tre giorni che i pagamenti ai nostri fornitori falliscono con l'errore 'IBAN non valido', ma l'IBAN è corretto e fino alla settimana scorsa funzionava. Abbiamo stipendi da pagare venerdì. Se non risolvete entro domani passiamo a un altro fornitore.",
   "questions": {
     "giorno": {
-      "type": "open",
+      "type": "short_answer",
       "instructions": "Entro quale giorno della settimana vanno pagati gli stipendi?",
       "top_k": 3
     },
     "lingua": {
-      "type": "open",
+      "type": "short_answer",
       "instructions": "In che lingua è scritto il messaggio?",
       "top_k": 3
     }

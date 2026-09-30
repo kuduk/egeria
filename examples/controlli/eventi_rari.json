@@ -1,0 +1,366 @@
+{
+  "descrizione": "Messaggi brevi scritti a mano per la verifica della calibrazione a input vuoto (scripts/verifica_calibrazione.py). Ogni evento è presente in 3 messaggi su 15 per lingua; alcuni negativi sono vicini all'evento (un camino acceso, delle candele, un mal di testa leggero).",
+  "domande": {
+    "it": {
+      "incendio": "Il messaggio segnala un incendio?",
+      "emergenza_medica": "Il messaggio segnala un'emergenza medica?"
+    },
+    "en": {
+      "incendio": "Does the message report a fire?",
+      "emergenza_medica": "Does the message report a medical emergency?"
+    }
+  },
+  "messaggi": [
+    {
+      "lingua": "it",
+      "testo": "Buongiorno, il pacco ordinato la settimana scorsa non è ancora arrivato. Potete controllare?",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Vorrei cambiare la password del mio account ma non ricevo l'email di conferma.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Esce fumo nero dal magazzino al piano terra, si vedono le fiamme dalla finestra!",
+      "eventi": [
+        "incendio"
+      ]
+    },
+    {
+      "lingua": "it",
+      "testo": "Mio padre è svenuto in cucina e non risponde, respira a fatica.",
+      "eventi": [
+        "emergenza_medica"
+      ]
+    },
+    {
+      "lingua": "it",
+      "testo": "La fattura di marzo riporta un importo diverso da quello concordato.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Il condominio ha organizzato la riunione per giovedì alle 18.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Sta bruciando il bosco dietro la scuola, il vento spinge le fiamme verso le case.",
+      "eventi": [
+        "incendio"
+      ]
+    },
+    {
+      "lingua": "it",
+      "testo": "Un collega si è tagliato con la taglierina e perde molto sangue dalla mano.",
+      "eventi": [
+        "emergenza_medica"
+      ]
+    },
+    {
+      "lingua": "it",
+      "testo": "Il ristorante è chiuso il lunedì, prenotate per martedì.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Il treno delle 8:15 è in ritardo di venti minuti.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Nel ristorante è scoppiato un incendio in cucina, i clienti stanno uscendo.",
+      "eventi": [
+        "incendio"
+      ]
+    },
+    {
+      "lingua": "it",
+      "testo": "Mia nonna ha un forte dolore al petto e al braccio sinistro da mezz'ora.",
+      "eventi": [
+        "emergenza_medica"
+      ]
+    },
+    {
+      "lingua": "it",
+      "testo": "Ho acceso il camino in salotto, finalmente la casa è calda.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Il corso di yoga riprende a ottobre, iscrizioni aperte.",
+      "eventi": []
+    },
+    {
+      "lingua": "it",
+      "testo": "Ho qualche linea di febbre da ieri, resto a casa dal lavoro.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "Hi, I was charged twice for my subscription this month. Can you refund one payment?",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "The meeting has been moved to Thursday at 3 pm.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "The kitchen is on fire and the smoke alarm is going off, we can't put it out!",
+      "eventi": [
+        "incendio"
+      ]
+    },
+    {
+      "lingua": "en",
+      "testo": "My friend collapsed at the gym and isn't breathing properly.",
+      "eventi": [
+        "emergenza_medica"
+      ]
+    },
+    {
+      "lingua": "en",
+      "testo": "Can you send me the updated price list for the spring catalogue?",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "Our flight landed on time and we're waiting for the luggage.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "Flames are coming out of the roof of the house next door, call the fire brigade!",
+      "eventi": [
+        "incendio"
+      ]
+    },
+    {
+      "lingua": "en",
+      "testo": "A cyclist was hit by a car and is lying on the road bleeding from the head.",
+      "eventi": [
+        "emergenza_medica"
+      ]
+    },
+    {
+      "lingua": "en",
+      "testo": "The library will be closed for maintenance next week.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "I lit some candles for dinner, the table looks lovely.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "A fire broke out in the server room and the building is being evacuated.",
+      "eventi": [
+        "incendio"
+      ]
+    },
+    {
+      "lingua": "en",
+      "testo": "My son swallowed some pills from the medicine cabinet and is now very drowsy.",
+      "eventi": [
+        "emergenza_medica"
+      ]
+    },
+    {
+      "lingua": "en",
+      "testo": "I've had a mild headache since this morning, nothing serious.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "The new printer on the second floor keeps jamming.",
+      "eventi": []
+    },
+    {
+      "lingua": "en",
+      "testo": "The garden needs watering, it hasn't rained for two weeks.",
+      "eventi": []
+    }
+  ],
+  "immagini": {
+    "descrizione": "Domande Sì/No sulle 21 immagini di examples/immagini (base, nuove/, estranee/): ogni evento è presente in 2 immagini. Le immagini escluse per una domanda sono ambigue (una fattura non è uno scontrino).",
+    "domande": {
+      "incendio": {
+        "it": "C'è un incendio in corso?",
+        "en": "Is there a fire burning?",
+        "positive": [
+          "casa_incendio.jpg",
+          "nuove/incendio2.jpg"
+        ]
+      },
+      "incidente": {
+        "it": "C'è un veicolo coinvolto in un incidente?",
+        "en": "Is there a vehicle involved in an accident?",
+        "positive": [
+          "incidente_auto.jpg",
+          "nuove/incidente2.jpg"
+        ]
+      },
+      "gatto": {
+        "it": "C'è un gatto?",
+        "en": "Is there a cat?",
+        "positive": [
+          "gatto.jpg",
+          "nuove/gatto2.jpg"
+        ]
+      },
+      "email": {
+        "it": "L'immagine mostra un'email?",
+        "en": "Does the image show an email?",
+        "positive": [
+          "email_phishing.png",
+          "nuove/phishing2.png"
+        ]
+      },
+      "stop": {
+        "it": "C'è un segnale di stop?",
+        "en": "Is there a stop sign?",
+        "positive": [
+          "stop_italia.jpg",
+          "nuove/stop2.jpg"
+        ]
+      },
+      "scontrino": {
+        "it": "L'immagine mostra uno scontrino?",
+        "en": "Does the image show a receipt?",
+        "positive": [
+          "scontrino.jpg",
+          "nuove/scontrino2.jpg"
+        ],
+        "escluse": [
+          "fattura.png"
+        ]
+      }
+    }
+  },
+  "pose": {
+    "descrizione": "Pose di yoga (examples/immagini/pose, fonti in FONTI.md): la tendenza al Sì vista sulla posa dell'albero. Gruppi: albero (positive), una_gamba e braccia_alzate (negative vicine), altre_pose, senza_persone (trappole: alberi veri, un uccello).",
+    "gruppi": {
+      "albero": [
+        "kavya_vrikshasan.jpg",
+        "free_souls.jpg",
+        "tree_pose_at_home.jpg",
+        "vriksasana_yoga_asana_nina_mel.jpg",
+        "tree_pose_with_the_trees.jpg",
+        "tree_pose.jpg",
+        "a_style_of_vrikshasana_1.jpg",
+        "a_style_of_vrikshasana_2.jpg",
+        "woman_yoga_pose.jpg"
+      ],
+      "una_gamba": [
+        "balance.jpg",
+        "dancer_s_pose.jpg",
+        "kavya_devduttasan.jpg",
+        "mr_yoga_lord_of_dance_1.jpg"
+      ],
+      "braccia_alzate": [
+        "urdhva_vrikshasana_front.jpg"
+      ],
+      "altre_pose": [
+        "a_style_of_utkatasana.jpg",
+        "ashish_veerbhadrasana.jpg",
+        "kavya_shulinasana.jpg",
+        "utkatasana_power_pose.jpg",
+        "virabhadrasana_ii_warrior_ii_pose.jpg",
+        "warrior_ii.jpg",
+        "yoga_warrior_i.jpg"
+      ],
+      "senza_persone": [
+        "2010_365_265_tree_yoga_5310864461.jpg",
+        "yoga_in_nature.jpg",
+        "vrksasana_50090707147.jpg"
+      ]
+    },
+    "domande": {
+      "albero": {
+        "it": "La persona sta facendo la posa dell'albero dello yoga?",
+        "en": "Is the person doing the yoga tree pose?",
+        "positivi": [
+          "albero"
+        ]
+      },
+      "una_gamba": {
+        "it": "La persona sta in equilibrio su una gamba sola?",
+        "en": "Is the person balancing on one leg?",
+        "positivi": [
+          "albero",
+          "una_gamba"
+        ]
+      },
+      "piede": {
+        "it": "Il piede della gamba sollevata è appoggiato all'interno dell'altra gamba?",
+        "en": "Is the foot of the raised leg resting against the inside of the other leg?",
+        "positivi": [
+          "albero"
+        ]
+      }
+    },
+    "scelte": {
+      "generica": {
+        "it": {
+          "instructions": "Che cosa mostra l'immagine?",
+          "criteria": {
+            "albero": "una persona nella posa dell'albero dello yoga",
+            "altra": "una persona in un'altra posa",
+            "nessuna": "nessuna persona in posa"
+          }
+        },
+        "en": {
+          "instructions": "What does the image show?",
+          "criteria": {
+            "albero": "a person in the yoga tree pose",
+            "altra": "a person in another pose",
+            "nessuna": "no person in a pose"
+          }
+        },
+        "gold": {
+          "albero": "albero",
+          "una_gamba": "altra",
+          "braccia_alzate": "altra",
+          "altre_pose": "altra",
+          "senza_persone": "nessuna"
+        }
+      },
+      "descritta": {
+        "it": {
+          "instructions": "Che cosa mostra l'immagine?",
+          "criteria": {
+            "albero": "una persona in piedi su una gamba, con il piede dell'altra appoggiato all'interno della gamba d'appoggio",
+            "ballerino": "una persona in piedi su una gamba, con l'altra gamba sollevata dietro",
+            "guerriero": "una persona con le gambe divaricate e un ginocchio piegato",
+            "sedia": "una persona con le ginocchia piegate, come seduta su una sedia invisibile",
+            "in_piedi": "una persona in piedi su due piedi",
+            "nessuna": "nessuna persona"
+          }
+        },
+        "en": {
+          "instructions": "What does the image show?",
+          "criteria": {
+            "albero": "a person standing on one leg, with the foot of the other leg resting against the inside of the standing leg",
+            "ballerino": "a person standing on one leg, with the other leg raised behind",
+            "guerriero": "a person with the legs wide apart and one knee bent",
+            "sedia": "a person with bent knees, as if sitting on an invisible chair",
+            "in_piedi": "a person standing on both feet",
+            "nessuna": "no person"
+          }
+        },
+        "gold": {
+          "albero": "albero",
+          "una_gamba": "ballerino",
+          "braccia_alzate": "in_piedi",
+          "altre_pose": null,
+          "senza_persone": "nessuna"
+        }
+      }
+    }
+  }
+}

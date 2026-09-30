@@ -50,7 +50,7 @@ def distribution(result: dict) -> tuple[str, np.ndarray]:
     if result["type"] == "noul":
         p = np.array([result["noul"], 1 - result["noul"]])
         return ("true" if p[0] >= 0.5 else "false"), p
-    if result["type"] == "open":
+    if result["type"] == "short_answer":
         return result["answer"], np.array([result["confidence"]])
     probabilities = result["probabilities"]
     return max(probabilities, key=probabilities.get), np.array(list(probabilities.values()))
