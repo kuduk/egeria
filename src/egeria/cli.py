@@ -82,6 +82,7 @@ def cmd_decide(args) -> int:
     response = scorer.decide(
         body, permutations=args.permutations, temperatures=load_temperatures(args.temperatures),
         default_min_confidence=args.min_confidence, memory=_memory(args, scorer),
+        yes_correction=not args.no_yes_correction,
     )
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0
@@ -102,6 +103,8 @@ def cmd_predict(args) -> int:
             state, questions = parse_request(case["body"])
             case_start = time.perf_counter()
             scores = scorer.score(state, questions, args.permutations)
+            if not args.no_yes_correction:  # come in decide: le temperature si fittano sopra la correzione
+                scorer.correct_yes_bias(scores, args.permutations)
             case_ms = (time.perf_counter() - case_start) * 1000
             for s in scores:
                 gold, label = gold_vector(s.question, case["gold"][s.question.id])
@@ -116,6 +119,7 @@ def cmd_predict(args) -> int:
                     "gold": gold,
                     "label": label,
                     "input_tokens": s.input_tokens,
+                    "yes_shift": round(s.yes_shift, 6),
                     "case_ms": case_ms,
                 }
                 handle.write(json.dumps(record) + "\n")
@@ -125,7 +129,8 @@ def cmd_predict(args) -> int:
                 print(f"{number}/{len(cases)} casi, {total_decisions} decisioni, {elapsed:.0f} s", file=sys.stderr)
     meta = {
         "model": args.model, "dtype": args.dtype, "quantize": args.quantize, "prompt_style": args.prompt_style,
-        "permutations": args.permutations, "split": args.split, "config": args.config, "cases": len(cases),
+        "permutations": args.permutations, "yes_correction": not args.no_yes_correction,
+        "split": args.split, "config": args.config, "cases": len(cases),
         "decisions": total_decisions, "seconds": time.perf_counter() - started,
     }
     out.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
@@ -157,7 +162,7 @@ def _fmt(row: dict, keys) -> str:
 def cmd_evaluate(args) -> int:
     from .calibration import load_temperatures
     from .confidence import softmax
-    from .metrics import flip_rate, summarize, summarize_by
+    from .metrics import flip_rate, summarize, summarize_by, threshold_split
 
     records, meta = _read_predictions(args.predictions)
     temperatures = load_temperatures(args.temperatures)
@@ -180,6 +185,13 @@ def cmd_evaluate(args) -> int:
     for name, row in report["by_workflow"].items():
         print(f"{name[:8]:8s}", _fmt(row, keys))
     print(f"flip rate permutazioni: {report['flip_rate']}  ms/caso: {report['ms_per_case']:.0f}")
+    if args.min_confidence is not None:
+        report["threshold"] = {"tutte": threshold_split(records, args.min_confidence)}
+        for qtype in sorted({r["type"] for r in records}):
+            report["threshold"][qtype] = threshold_split([r for r in records if r["type"] == qtype], args.min_confidence)
+        for name, row in report["threshold"].items():
+            print(f"min_confidence {args.min_confidence} {name:7s} incerte={row['uncertain_share']:.3f} "
+                  f"acc_decise={row['decided_accuracy']:.3f} acc_incerte={row['uncertain_accuracy']:.3f}")
     if args.prior:
         # Riferimento che non legge lo stato: distribuzione gold media per (workflow, domanda) sul train.
         train, _ = _read_predictions(args.prior)
@@ -266,7 +278,8 @@ def cmd_suite(args) -> int:
     for case in cases:
         body = case["body"]
         started = time.perf_counter()
-        response = scorer.decide(body, args.permutations, temperatures, default_min_confidence=args.min_confidence)
+        response = scorer.decide(body, args.permutations, temperatures, default_min_confidence=args.min_confidence,
+                                 yes_correction=not args.no_yes_correction)
         elapsed += time.perf_counter() - started
         _, questions = parse_request(body, args.min_confidence)
         for q in questions:
@@ -348,6 +361,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="egeria", description="Modello decisionale System 1 su Qwen3.5")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def permutations_arg(value: str):
+        if value == "auto":
+            return value
+        try:
+            number = int(value)
+        except ValueError:
+            number = 0
+        if not 1 <= number <= 26:
+            raise argparse.ArgumentTypeError("serve 'auto' o un intero fra 1 e 26")
+        return number
+
+    def correction_args(p):
+        p.add_argument("--permutations", type=permutations_arg, default="auto",
+                       help="ordini delle opzioni: auto = tutte le rotazioni (diretto e inverso per le scale), oppure 1-26")
+        p.add_argument("--no-yes-correction", action="store_true",
+                       help="senza la correzione della tendenza al Sì (domande Sì/No riposte sullo stato vuoto)")
+
     def share_state_arg(p):
         p.add_argument("--share-state", default="auto", choices=["auto", "always", "never"],
                        help="riuso dello stato: prefisso (istruzioni + stato) calcolato una volta per tutte le domande")
@@ -359,8 +389,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--quantize", default=None, choices=["4bit"])
         p.add_argument("--prompt-style", default="chat", choices=["chat", "plain"])
         p.add_argument("--batch-tokens", type=int, default=12288)
-        p.add_argument("--permutations", type=int, default=1)
         p.add_argument("--vision", action="store_true", help="carica il modello con la torre visiva (stati con immagini)")
+        correction_args(p)
         share_state_arg(p)
 
     sub.add_parser("info", help="ambiente, GPU e kernel veloci").set_defaults(func=cmd_info)
@@ -407,6 +437,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--predictions", required=True)
     p.add_argument("--temperatures")
     p.add_argument("--prior", help="predizioni del train: stampa il riferimento che non legge lo stato")
+    p.add_argument("--min-confidence", type=float,
+                   help="soglia come nel server: quota di risposte incerte e accuratezza delle decise e delle incerte")
     p.add_argument("--report", help="salva il report completo in JSON")
     p.set_defaults(func=cmd_evaluate)
 
@@ -422,7 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--text-only", action="store_true", help="senza torre visiva (niente immagini)")
     share_state_arg(p)
     p.add_argument("--temperatures", help="file delle temperature (calibrazione, mai applicata alle immagini)")
-    p.add_argument("--permutations", type=int, default=2)
+    correction_args(p)
     p.add_argument("--min-confidence", type=float, default=0.5, help="soglia di default sotto cui una risposta è 'incerta'")
     p.add_argument("--image-max-side", type=int, default=448, help="lato massimo delle immagini, se la richiesta non lo indica")
     p.add_argument("--allow-paths", action="store_true", help="accetta immagini indicate con un percorso locale")

@@ -3,7 +3,7 @@
     .venv/bin/egeria model-server --model Qwen/Qwen3.5-2B-Base          # porta 8100
 
 Tiene caricato il modello e risponde a tre chiamate:
-- `GET  /v1/info`: modello, dispositivo, parte visiva, calibrazione;
+- `GET  /v1/info`: modello, dispositivo, parte visiva, permutazioni, correzioni;
 - `POST /v1/systemone`: la decisione (API compatibile Jev, con le estensioni Egeria);
 - `POST /v1/embed`: il vettore semantico di uno stato (per la memoria).
 
@@ -18,19 +18,33 @@ import hmac
 import threading
 import time
 
-from .schema import RequestError, image_max_side, is_multimodal, parse_state
+from .prompt import AUTO
+from .schema import MAX_OPTIONS, RequestError, image_max_side, is_multimodal, parse_state
 
-MAX_PERMUTATIONS = 8
+# Fino a una rotazione per opzione: con tutte le rotazioni sparisce la preferenza per la posizione
+# (documentazione/09-controlli-senza-etichette.md §2). "auto" (il default) = tutte le rotazioni.
+MAX_PERMUTATIONS = MAX_OPTIONS
+
+
+def check_permutations(value) -> int | str:
+    """`"auto"` oppure un intero fra 1 e MAX_PERMUTATIONS."""
+    if value == AUTO:
+        return value
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_PERMUTATIONS:
+        raise RequestError(f"permutations deve essere 'auto' o un intero fra 1 e {MAX_PERMUTATIONS}")
+    return value
 
 
 class ModelService:
     """Il modello, le temperature e un lock che serializza l'uso della GPU."""
 
-    def __init__(self, scorer, temperatures=None, permutations: int = 2,
-                 min_confidence: float | None = 0.5, image_max_side: int = 448, allow_paths: bool = False):
+    def __init__(self, scorer, temperatures=None, permutations: int | str = AUTO,
+                 min_confidence: float | None = 0.5, image_max_side: int = 448, allow_paths: bool = False,
+                 yes_correction: bool = True):
         self.scorer = scorer
         self.temperatures = temperatures or {}
         self.permutations = permutations
+        self.yes_correction = yes_correction
         self.min_confidence = min_confidence
         self.image_max_side = image_max_side
         self.allow_paths = allow_paths
@@ -47,8 +61,9 @@ class ModelService:
     def decide(self, body: dict) -> dict:
         """Decisione. Oltre ai campi di `/v1/systemone` accetta:
 
-        - `"permutations": n` (1–8), per cambiare il numero di permutazioni delle opzioni;
-        - `"calibrated": false`, per avere le probabilità grezze anche con le temperature caricate.
+        - `"permutations": n` (1–26) o `"auto"` (tutte le rotazioni; diretto e inverso per le scale);
+        - `"yes_correction": false`, per togliere la correzione della tendenza al Sì;
+        - `"calibrated": false`, per avere le probabilità senza le temperature caricate.
 
         La calibrazione non si applica mai agli stati con immagini: le temperature sono fittate su testo.
         """
@@ -56,20 +71,20 @@ class ModelService:
             raise RequestError("il body deve essere un oggetto JSON")
         if "memory" in body:
             raise RequestError("la memoria sta nel server web (egeria serve): il server del modello non la consulta")
-        permutations = body.get("permutations", self.permutations)
-        if not isinstance(permutations, int) or isinstance(permutations, bool) or not 1 <= permutations <= MAX_PERMUTATIONS:
-            raise RequestError(f"permutations deve essere un intero fra 1 e {MAX_PERMUTATIONS}")
+        permutations = check_permutations(body.get("permutations", self.permutations))
         calibrated = body.get("calibrated", True)
-        if not isinstance(calibrated, bool):
-            raise RequestError("calibrated deve essere true o false")
+        yes_correction = body.get("yes_correction", self.yes_correction)
+        for name, value in (("calibrated", calibrated), ("yes_correction", yes_correction)):
+            if not isinstance(value, bool):
+                raise RequestError(f"{name} deve essere true o false")
         calibrated = calibrated and not is_multimodal(body.get("state"))
         self.check_images(body.get("state"))
-        body = {k: v for k, v in body.items() if k not in ("permutations", "calibrated")}
+        body = {k: v for k, v in body.items() if k not in ("permutations", "calibrated", "yes_correction")}
         body.setdefault("image_max_side", self.image_max_side)
         with self.lock:
             return self.scorer.decide(
                 body, permutations=permutations, temperatures=self.temperatures if calibrated else {},
-                default_min_confidence=self.min_confidence,
+                default_min_confidence=self.min_confidence, yes_correction=yes_correction,
             )
 
     def embed(self, body: dict) -> dict:
@@ -107,8 +122,9 @@ def create_model_app(service: ModelService, info: dict | None = None, token: str
 
     @app.get("/v1/info", dependencies=[Depends(authorized)])
     def model_info():
-        return {**info, "permutations": service.permutations, "min_confidence": service.min_confidence,
-                "image_max_side": service.image_max_side, "calibrated": bool(service.temperatures)}
+        return {**info, "permutations": service.permutations, "yes_correction": service.yes_correction,
+                "min_confidence": service.min_confidence, "image_max_side": service.image_max_side,
+                "calibrated": bool(service.temperatures)}
 
     @app.post("/v1/systemone", dependencies=[Depends(authorized)])
     def systemone(body: dict = Body(...)):
@@ -135,7 +151,7 @@ def serve_model(args) -> int:
                             vision=not args.text_only, share_state=args.share_state)
     service = ModelService(scorer, load_temperatures(args.temperatures), permutations=args.permutations,
                            min_confidence=args.min_confidence, image_max_side=args.image_max_side,
-                           allow_paths=args.allow_paths)
+                           allow_paths=args.allow_paths, yes_correction=not args.no_yes_correction)
     info = {"model": args.model, "device": str(scorer.device), "vision": scorer.processor is not None,
             "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}
     token = args.token or os.environ.get("EGERIA_TOKEN") or None

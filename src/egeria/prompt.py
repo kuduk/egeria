@@ -27,7 +27,7 @@ SYSTEM_PROMPT = (
     "chosen option, with no explanation or reasoning."
 )
 
-OPEN_SYSTEM_PROMPT = (
+SHORT_ANSWER_SYSTEM_PROMPT = (
     "You are a decision engine. Read the state and answer the question with a single word, "
     "with no explanation or reasoning."
 )
@@ -36,22 +36,28 @@ TYPE_HINTS = {
     "noul": "Decide whether the statement or question below holds for the state.",
     "choice": "Choose the single option that best answers the question for the state.",
     "score": "Place the state on the ordered scale below, from the lowest level to the highest.",
-    "number": "Estimate the quantity asked and choose the range that contains it.",
+    "estimate": "Estimate the quantity asked and choose the range that contains it.",
 }
 
-ORDINAL = {"score", "number"}
+ORDINAL = {"score", "estimate"}
+# Permutazioni di default: tutte le rotazioni per noul e choice (ogni opzione passa per ogni
+# posizione, e la preferenza per la posizione si annulla), ordine diretto e inverso per le scale.
+# Misure in documentazione/09-controlli-senza-etichette.md §2 e §8.
+AUTO = "auto"
 
 
-def orderings(question: Question, permutations: int) -> list[list[int]]:
+def orderings(question: Question, permutations: int | str) -> list[list[int]]:
     """Ordini di presentazione delle opzioni, come indici nell'ordine originale.
 
     Per noul e choice si usano rotazioni cicliche equispaziate, così ogni opzione
     occupa posizioni diverse. Per score l'ordine della scala conta, quindi si usa al
-    massimo l'ordine originale e quello inverso.
+    massimo l'ordine originale e quello inverso. `"auto"` = tutte le rotazioni.
     """
     n = len(question.options)
-    if permutations < 1:
-        raise ValueError("permutations deve essere >= 1")
+    if permutations == AUTO:
+        permutations = 2 if question.type in ORDINAL else n
+    if isinstance(permutations, bool) or not isinstance(permutations, int) or permutations < 1:
+        raise ValueError("permutations deve essere un intero >= 1 oppure 'auto'")
     identity = list(range(n))
     if question.type in ORDINAL:
         return [identity] if permutations == 1 else [identity, identity[::-1]]
@@ -65,7 +71,7 @@ def orderings(question: Question, permutations: int) -> list[list[int]]:
 
 def _option_line(letter: str, question: Question, index: int) -> str:
     option = question.options[index]
-    if question.type == "number":
+    if question.type == "estimate":
         return f"{letter}. {option.description}"
     if question.type == "score":
         label = f"level {option.key} of {len(question.options) - 1}"
@@ -103,17 +109,17 @@ def build_plain(state, question: Question, order: list[int]) -> str:
     return f"{SYSTEM_PROMPT}\n\n{user_content(state, question, order)}\n\nAnswer:"
 
 
-def open_content(state, question: Question) -> str:
+def short_answer_content(state, question: Question) -> str:
     return "\n".join([
         "<state>", render_state(state), "</state>", "", f"Question: {question.instructions}", "",
         "Answer with a single word.",
     ])
 
 
-def build_open_messages(state, question: Question) -> list[dict]:
+def build_short_answer_messages(state, question: Question) -> list[dict]:
     return [
-        {"role": "system", "content": OPEN_SYSTEM_PROMPT},
-        {"role": "user", "content": open_content(state, question)},
+        {"role": "system", "content": SHORT_ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": short_answer_content(state, question)},
     ]
 
 

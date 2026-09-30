@@ -13,7 +13,7 @@ La F0 trasforma un Qwen3.5 **senza alcun training** in un modello decisionale co
 1. Per ogni domanda si costruisce un prompt che contiene lo stato, la domanda e le opzioni etichettate A, B, C, …, con il chat template in modalità non-thinking.
 2. **Un solo forward pass** per prompt, senza generare token.
 3. Si prende l'hidden state finale dell'ultima posizione e lo si moltiplica **solo per le righe dell'lm_head delle lettere**. La softmax è ristretta alle opzioni dichiarate.
-4. Con `--permutations P` ogni domanda viene valutata con P ordini diversi delle opzioni: rotazioni cicliche per `noul`/`choice`, ordine diretto e inverso per `score`. Le log-probabilità si mediano per opzione, così si riduce il bias di posizione.
+4. Con `--permutations P` ogni domanda viene valutata con P ordini diversi delle opzioni: rotazioni cicliche per `noul`/`choice`, ordine diretto e inverso per `score`. Le log-probabilità si mediano per opzione, così si riduce il bias di posizione. Dal 29/09/2026 il default è `auto`, tutte le rotazioni, e le domande Sì/No hanno la correzione della tendenza al Sì (`--no-yes-correction` per toglierla): [09](09-controlli-senza-etichette.md) §9. Le misure di questo documento sono fatte con `--permutations 2` e senza correzione.
 5. **Temperature scaling** per tipo di domanda, fittato su dati separati (il train split).
 6. **Readout intermedi** (tolti il 29/09/2026). Gli hidden state all'uscita dei layer full-attention passano per la norm finale e per le righe delle lettere (logit lens). Servono a studiare la profondità dinamica per asserzione (vedi [02 §4bis](02-implicazioni-e-proposta.md)).
 
@@ -97,8 +97,8 @@ Esempi pronti in [examples/](../examples/): `ticket_it.json` (ticket in italiano
 # Temperature fittate sul train (una per tipo di domanda)
 .venv/bin/egeria calibrate --predictions runs/x/train.jsonl --out runs/x/temperature.json
 
-# Report
-.venv/bin/egeria evaluate --predictions runs/x/test.jsonl --temperatures runs/x/temperature.json
+# Report (con --min-confidence 0.5: quota di risposte incerte e accuratezza delle decise)
+.venv/bin/egeria evaluate --predictions runs/x/test.jsonl --temperatures runs/x/temperature.json --min-confidence 0.5
 
 # Pipeline completa, staccata dalla sessione
 setsid nohup scripts/run_all.sh > runs/run_all.log 2>&1 &

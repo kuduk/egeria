@@ -1,0 +1,35 @@
+{
+  "_descrizione": "Coppie affermazione/negazione per misurare la tendenza al Sì (scripts/controlli_senza_etichette.py). Nelle negazioni le descrizioni di true e false si scambiano da sole.",
+  "typed-decisions": {
+    "agent_trace_observability/needs_review": "This trace does not require human review.",
+    "customer_service/needs_human": "This conversation does not require a human agent; it can be handled automatically.",
+    "invoice_processing/duplicate": "This invoice does not appear to duplicate any invoice already submitted.",
+    "invoice_processing/matches_order": "The invoice does not reconcile with the purchase order and the recorded delivery.",
+    "security_incidents/credential_compromise": "The evidence does not indicate that any credential or account has been compromised.",
+    "security_incidents/true_positive": "This alert does not reflect genuinely malicious or unauthorised activity."
+  },
+  "suite_it": {
+    "Il cliente chiede un rimborso.": {"negazione": "Il cliente non chiede un rimborso.", "en": ["The customer is asking for a refund.", "The customer is not asking for a refund."]},
+    "L'importo della fattura corrisponde a quello dell'ordine.": {"negazione": "L'importo della fattura non corrisponde a quello dell'ordine.", "en": ["The invoice amount matches the order amount.", "The invoice amount does not match the order amount."]},
+    "Il cliente si lamenta di qualcosa.": {"negazione": "Il cliente non si lamenta di nulla.", "en": ["The customer is complaining about something.", "The customer is not complaining about anything."]},
+    "Questo messaggio è un tentativo di phishing o di truffa.": {"negazione": "Questo messaggio non è un tentativo di phishing o di truffa.", "en": ["This message is a phishing or scam attempt.", "This message is not a phishing or scam attempt."]},
+    "Il cliente vuole disdire l'abbonamento.": {"negazione": "Il cliente non vuole disdire l'abbonamento.", "en": ["The customer wants to cancel the subscription.", "The customer does not want to cancel the subscription."]},
+    "Serve la revisione di un umano.": {"negazione": "Non serve la revisione di un umano.", "en": ["A human review is needed.", "No human review is needed."]}
+  },
+  "immagini": [
+    {"image": "examples/immagini/pericolo.png", "it": ["L'immagine contiene un avviso di pericolo.", "L'immagine non contiene un avviso di pericolo."], "en": ["The image contains a danger warning.", "The image does not contain a danger warning."]},
+    {"image": "examples/immagini/fattura.png", "it": ["L'importo della fattura corrisponde a quello dell'ordine.", "L'importo della fattura non corrisponde a quello dell'ordine."], "en": ["The invoice amount matches the order amount.", "The invoice amount does not match the order amount."]},
+    {"image": "examples/immagini/scontrino.jpg", "it": ["La spesa supera i 50 euro.", "La spesa non supera i 50 euro."], "en": ["The purchase exceeds 50 euros.", "The purchase does not exceed 50 euros."]},
+    {"image": "examples/immagini/email_phishing.png", "it": ["L'email chiede di cliccare un link per verificare o aggiornare dei dati.", "L'email non chiede di cliccare un link per verificare o aggiornare dei dati."], "en": ["The email asks you to click a link to verify or update some details.", "The email does not ask you to click a link to verify or update any details."]},
+    {"image": "examples/immagini/incidente_auto.jpg", "it": ["Il veicolo nell'immagine è danneggiato.", "Il veicolo nell'immagine non è danneggiato."], "en": ["The vehicle in the image is damaged.", "The vehicle in the image is not damaged."]},
+    {"image": "examples/immagini/stop_italia.jpg", "it": ["Il segnale obbliga a fermarsi.", "Il segnale non obbliga a fermarsi."], "en": ["The sign requires you to stop.", "The sign does not require you to stop."]},
+    {"image": "examples/immagini/casa_incendio.jpg", "it": ["C'è un incendio in corso.", "Non c'è un incendio in corso."], "en": ["There is a fire in progress.", "There is no fire in progress."]},
+    {"image": "examples/immagini/gatto.jpg", "it": ["C'è una situazione di pericolo nell'immagine.", "Non c'è una situazione di pericolo nell'immagine."], "en": ["There is a dangerous situation in the image.", "There is no dangerous situation in the image."]},
+    {"image": "examples/immagini/gatto.jpg", "it": ["Nell'immagine c'è un cane.", "Nell'immagine non c'è un cane."], "en": ["There is a dog in the image.", "There is no dog in the image."]},
+    {"image": "examples/immagini/cerchio_rosso.png", "it": ["La forma è un quadrato.", "La forma non è un quadrato."], "en": ["The shape is a square.", "The shape is not a square."]},
+    {"image": "examples/immagini/casa_incendio.jpg", "it": ["L'immagine mostra un incidente stradale.", "L'immagine non mostra un incidente stradale."], "en": ["The image shows a road accident.", "The image does not show a road accident."]},
+    {"image": "examples/immagini/scontrino.jpg", "it": ["Lo scontrino è di una farmacia.", "Lo scontrino non è di una farmacia."], "en": ["The receipt is from a pharmacy.", "The receipt is not from a pharmacy."]},
+    {"image": "examples/immagini/stop_italia.jpg", "it": ["Il cartello è un limite di velocità.", "Il cartello non è un limite di velocità."], "en": ["The sign is a speed limit.", "The sign is not a speed limit."]},
+    {"image": "examples/immagini/incidente_auto.jpg", "it": ["L'auto coinvolta è rossa.", "L'auto coinvolta non è rossa."], "en": ["The car involved is red.", "The car involved is not red."]}
+  ]
+}

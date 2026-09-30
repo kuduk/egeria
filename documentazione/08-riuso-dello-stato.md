@@ -72,6 +72,15 @@ Risultato con `auto`, rispetto ai prompt interi (mediana):
 | 2B-Base | 1.00 (nessuna perdita) | **0.39** (fino a 0.20) |
 | 0.8B-Base | 1.01 | **0.61** (fino a 0.24) |
 
+**Carico realistico sul testo: typed-decisions.** 40 casi del test, 5 domande ciascuno, 2 permutazioni, 2B su GPU, due esecuzioni per modalità (`egeria predict --limit 40 --share-state never|auto`):
+
+| | Prompt interi | `auto` |
+|---|---|---|
+| Tempo per caso | 500–516 ms | **233–247 ms** (−53%, circa il doppio più veloce) |
+| Risposte uguali | – | 197/200 |
+
+Le 3 risposte diverse erano quasi pari: per esempio 0.288 contro 0.281 per le prime due opzioni. Il rumore del bf16 le sposta da una parte o dall'altra. Qui i prompt sono lunghi (~720 token per domanda) e le domande tante, quindi `auto` condivide il prefisso anche sul testo.
+
 Le soglie sono misurate su una sola GPU (RTX 4070 Laptop). Su hardware diverso il pareggio può spostarsi: lo script le rimisura.
 
 ## 5. Uso
@@ -89,6 +98,6 @@ CUDA_VISIBLE_DEVICES= .venv/bin/python scripts/bench_riuso_stato.py Qwen/Qwen3.5
 
 ## 6. Cosa resta fuori
 
-- **Le domande `open`** fanno ancora ciascuna il proprio passaggio completo: prima si calcola il prompt intero, poi si completano le candidate. Si potrebbe partire dalla stessa cache del prefisso.
+- **Le domande `short_answer`** fanno ancora ciascuna il proprio passaggio completo: prima si calcola il prompt intero, poi si completano le candidate. Si potrebbe partire dalla stessa cache del prefisso.
 - **Il vettore dello stato per la memoria** (`/v1/embed`) è un passaggio a parte sullo stesso stato. Il server web lo chiede prima della decisione, con due chiamate HTTP separate.
 - **Il costo fisso per passaggio** resta il limite sui testi brevi su GPU. È l'obiettivo dei CUDA graphs ([04-stato-con-immagini.md](04-stato-con-immagini.md) §4).

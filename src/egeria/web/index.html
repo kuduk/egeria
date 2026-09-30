@@ -20,18 +20,19 @@
   </script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Vai al contenuto</a>
+  <a class="skip-link" href="#main" data-i18n="skip">Vai al contenuto</a>
   <header class="topbar">
-    <div class="brand"><img class="brand-mark" src="img/emblema.png" alt="" width="32" height="32">Egeria</div>
-    <nav class="tabs" aria-label="Sezioni">
+    <div class="brand"><img class="brand-mark" src="img/emblema.png" alt="" width="32" height="32"><span class="brand-name">Egeria</span></div>
+    <nav class="tabs" aria-label="Sezioni" data-i18n-aria-label="nav.label">
       <button class="tab" data-view="chiedi" aria-controls="view-chiedi"></button>
       <button class="tab" data-view="storico" aria-controls="view-storico"></button>
       <button class="tab" data-view="ricordi" aria-controls="view-ricordi"></button>
     </nav>
     <div class="topbar-right">
       <span class="server-status" id="server-status" role="status"></span>
-      <button class="icon-button" id="settings-button" aria-label="Impostazioni"></button>
-      <button class="icon-button" id="theme-button" aria-label="Tema chiaro o scuro"></button>
+      <button class="icon-button" id="settings-button" aria-label="Impostazioni" data-i18n-aria-label="settings.open" data-i18n-title="settings.open"></button>
+      <button class="icon-button" id="theme-button" aria-label="Tema chiaro o scuro" data-i18n-aria-label="theme.toggle" data-i18n-title="theme.toggle"></button>
+      <button class="icon-button lang-button" id="lang-button" type="button"></button>
     </div>
   </header>
 
@@ -41,30 +42,30 @@
       <div class="ask-grid">
         <section class="panel" aria-labelledby="look-title">
           <div class="panel-head">
-            <h2 id="look-title">Cosa guardare</h2>
-            <div class="segmented" id="mode-switch" role="radiogroup" aria-label="Modalità">
-              <button role="radio" data-mode="static" aria-checked="true">Testo e immagini</button>
-              <button role="radio" data-mode="live" aria-checked="false">Dal vivo</button>
+            <h2 id="look-title" data-i18n="look.title">Cosa guardare</h2>
+            <div class="segmented" id="mode-switch" role="radiogroup" aria-label="Modalità" data-i18n-aria-label="look.mode">
+              <button role="radio" data-mode="live" aria-checked="true" data-i18n="look.live">Dal vivo</button>
+              <button role="radio" data-mode="static" aria-checked="false" data-i18n="look.static">Testo e immagini</button>
             </div>
           </div>
 
-          <div id="static-input" class="look-body">
-            <label class="visually-hidden" for="input-text">Testo da analizzare</label>
-            <textarea id="input-text" rows="8" placeholder="Scrivi o incolla qui un testo: un messaggio, un'email, una descrizione…"></textarea>
+          <div id="static-input" class="look-body" hidden>
+            <label class="visually-hidden" for="input-text" data-i18n="look.textLabel">Testo da analizzare</label>
+            <textarea id="input-text" rows="8" placeholder="Scrivi o incolla qui un testo: un messaggio, un'email, una descrizione…" data-i18n-placeholder="look.textPlaceholder"></textarea>
             <div class="dropzone" id="image-drop">
               <span class="dropzone-text"></span>
               <input type="file" id="image-input" accept="image/*" multiple hidden>
             </div>
-            <ul class="image-list" id="image-list" aria-label="Immagini aggiunte"></ul>
+            <ul class="image-list" id="image-list" aria-label="Immagini aggiunte" data-i18n-aria-label="look.images"></ul>
           </div>
 
-          <div id="live-input" class="look-body" hidden>
+          <div id="live-input" class="look-body">
             <div class="video-wrap">
-              <video id="live-video" playsinline muted aria-label="Anteprima dal vivo"></video>
-              <p class="video-placeholder" id="live-placeholder">Scegli da dove prendere le immagini</p>
+              <video id="live-video" playsinline muted aria-label="Anteprima dal vivo" data-i18n-aria-label="live.preview"></video>
+              <p class="video-placeholder" id="live-placeholder" data-i18n="live.placeholder">Scegli da dove prendere le immagini</p>
               <div class="video-stats" id="live-stats"></div>
             </div>
-            <div class="live-sources" role="radiogroup" aria-label="Sorgente">
+            <div class="live-sources" role="radiogroup" aria-label="Sorgente" data-i18n-aria-label="live.source">
               <button class="button" role="radio" data-source="webcam" aria-checked="false"></button>
               <button class="button" role="radio" data-source="screen" aria-checked="false"></button>
               <button class="button" role="radio" data-source="file" aria-checked="false"></button>
@@ -72,23 +73,23 @@
             </div>
             <div class="live-options">
               <label class="field">
-                <span class="field-label">Quante immagini al secondo</span>
+                <span class="field-label" data-i18n="live.fps">Quante immagini al secondo</span>
                 <select id="live-fps">
-                  <option value="1">1 al secondo</option>
-                  <option value="2" selected>2 al secondo</option>
-                  <option value="5">5 al secondo</option>
-                  <option value="0">Il più possibile</option>
+                  <option value="1" data-i18n="live.fps1">1 al secondo</option>
+                  <option value="2" data-i18n="live.fps2">2 al secondo</option>
+                  <option value="5" data-i18n="live.fps5">5 al secondo</option>
+                  <option value="0" selected data-i18n="live.fpsMax">Il più possibile</option>
                 </select>
               </label>
               <label class="field">
-                <span class="field-label">Avvisami quando sono sicuro almeno al <output id="live-threshold-value">80%</output></span>
+                <span class="field-label"><span data-i18n="live.threshold">Avvisami quando sono sicuro almeno al</span> <output id="live-threshold-value">80%</output></span>
                 <input type="range" id="live-threshold" min="0.5" max="0.99" step="0.01" value="0.8">
               </label>
             </div>
             <div class="alerts">
               <div class="alerts-head">
-                <h3>Avvisi</h3>
-                <button class="button ghost small" id="clear-alerts">Svuota</button>
+                <h3 data-i18n="live.alerts">Avvisi</h3>
+                <button class="button ghost small" id="clear-alerts" data-i18n="live.clear">Svuota</button>
               </div>
               <ul class="alert-list" id="alert-list" aria-live="polite"></ul>
             </div>
@@ -96,20 +97,20 @@
 
           <div class="panel-foot">
             <label class="inline-field">
-              <span>Prova un esempio</span>
-              <select id="examples"><option value="">Scegli…</option></select>
+              <span data-i18n="look.examples">Prova un esempio</span>
+              <select id="examples"><option value="" data-i18n="look.choose">Scegli…</option></select>
             </label>
-            <button class="button ghost" id="reset-button">Ricomincia da zero</button>
+            <button class="button ghost" id="reset-button" data-i18n="look.reset">Ricomincia da zero</button>
           </div>
         </section>
 
         <section class="panel" aria-labelledby="ask-title">
           <div class="panel-head">
-            <h2 id="ask-title">Cosa chiedere</h2>
+            <h2 id="ask-title" data-i18n="ask.title">Cosa chiedere</h2>
             <div class="saved-sets">
-              <label class="visually-hidden" for="saved-sets">Domande salvate</label>
+              <label class="visually-hidden" for="saved-sets" data-i18n="ask.savedLabel">Domande salvate</label>
               <select id="saved-sets"><option value="">Domande salvate…</option></select>
-              <button class="button ghost small" id="save-set">Salva queste domande</button>
+              <button class="button ghost small" id="save-set" data-i18n="ask.saveSet">Salva queste domande</button>
             </div>
           </div>
 
@@ -124,10 +125,10 @@
           <div class="teach" id="teach" hidden>
             <div>
               <p class="teach-title">Le risposte vanno bene?</p>
-              <p class="muted">Correggi quelle sbagliate con «Correggi», poi salva: il caso verrà ricordato e usato per i casi simili.</p>
+              <p class="muted" data-i18n="teach.help">Correggi quelle sbagliate con «Correggi», poi salva: il caso verrà ricordato e usato per i casi simili.</p>
             </div>
-            <label class="visually-hidden" for="teach-note">Nota</label>
-            <input type="text" id="teach-note" placeholder="Nota facoltativa: cosa hai verificato, com'è andata…">
+            <label class="visually-hidden" for="teach-note" data-i18n="teach.noteLabel">Nota</label>
+            <input type="text" id="teach-note" placeholder="Nota facoltativa: cosa hai verificato, com'è andata…" data-i18n-placeholder="teach.notePlaceholder">
             <button class="button primary" id="teach-button"></button>
           </div>
         </section>
@@ -137,32 +138,32 @@
     <!-- ============================================================ STORICO -->
     <section class="view" id="view-storico" hidden>
       <div class="list-toolbar">
-        <h2>Storico delle domande</h2>
-        <div class="segmented" id="history-filter" role="radiogroup" aria-label="Filtro">
-          <button role="radio" data-view="da_rivedere" aria-checked="true">Da controllare <span class="count" data-count="da_rivedere"></span></button>
-          <button role="radio" data-view="tutti" aria-checked="false">Tutte <span class="count" data-count="tutti"></span></button>
+        <h2 data-i18n="history.title">Storico delle domande</h2>
+        <div class="segmented" id="history-filter" role="radiogroup" aria-label="Filtro" data-i18n-aria-label="history.filter">
+          <button role="radio" data-view="da_rivedere" aria-checked="true"><span data-i18n="history.review">Da controllare</span> <span class="count" data-count="da_rivedere"></span></button>
+          <button role="radio" data-view="tutti" aria-checked="false"><span data-i18n="history.all">Tutte</span> <span class="count" data-count="tutti"></span></button>
         </div>
       </div>
-      <p class="muted">Le analisi «da controllare» hanno risposte incerte o diverse da quelle dei casi simili già ricordati. Aprile, correggi se serve e salvale nei ricordi.</p>
+      <p class="muted" data-i18n="history.help">Le analisi «da controllare» hanno risposte incerte o diverse da quelle dei casi simili già ricordati. Aprile, correggi se serve e salvale nei ricordi.</p>
       <ul class="history-list" id="history-list"></ul>
     </section>
 
     <!-- ============================================================ RICORDI -->
     <section class="view" id="view-ricordi" hidden>
       <div class="list-toolbar">
-        <h2>Ricordi</h2>
+        <h2 data-i18n="memory.title">Ricordi</h2>
         <span class="muted" id="memory-total"></span>
       </div>
-      <p class="muted">Sono i casi che hai salvato. Quando fai una domanda su qualcosa di simile, il modello ti mostra cosa avevi deciso.</p>
+      <p class="muted" data-i18n="memory.help">Sono i casi che hai salvato. Quando fai una domanda su qualcosa di simile, il modello ti mostra cosa avevi deciso.</p>
       <div class="memory-search">
         <form id="memory-search-form" role="search" class="search">
-          <label class="visually-hidden" for="memory-query">Cerca tra i ricordi</label>
-          <input type="search" id="memory-query" placeholder="Descrivi qualcosa: trovo i ricordi più simili">
+          <label class="visually-hidden" for="memory-query" data-i18n="memory.searchLabel">Cerca tra i ricordi</label>
+          <input type="search" id="memory-query" placeholder="Descrivi qualcosa: trovo i ricordi più simili" data-i18n-placeholder="memory.searchPlaceholder">
           <button class="button" type="submit" id="memory-search-button"></button>
         </form>
         <button class="button" id="memory-image-button"></button>
         <input type="file" id="memory-image-input" accept="image/*" hidden>
-        <button class="button ghost" id="memory-show-all" hidden>Mostra tutti</button>
+        <button class="button ghost" id="memory-show-all" hidden data-i18n="memory.showAll">Mostra tutti</button>
       </div>
       <div class="memory-grid" id="memory-grid"></div>
     </section>
@@ -171,43 +172,51 @@
   <!-- ============================================================ DIALOGHI -->
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <form method="dialog" class="dialog">
-      <h2 id="settings-title">Impostazioni</h2>
+      <h2 id="settings-title" data-i18n="settings.title">Impostazioni</h2>
+      <label class="field" id="language-field">
+        <span class="field-label" data-i18n="settings.language">Lingua · Language</span>
+        <select id="language">
+          <option value="it" lang="it">Italiano</option>
+          <option value="en" lang="en">English</option>
+        </select>
+      </label>
       <fieldset class="field">
-        <legend class="field-label">Quando segnalare una risposta come incerta</legend>
-        <label class="radio"><input type="radio" name="sensitivity" value="0.7"> Spesso: più prudente, più casi da controllare</label>
-        <label class="radio"><input type="radio" name="sensitivity" value="0.5"> Normale</label>
-        <label class="radio"><input type="radio" name="sensitivity" value="0.3"> Raramente: meno casi da controllare</label>
+        <legend class="field-label" data-i18n="settings.sensitivity">Quando segnalare una risposta come incerta</legend>
+        <label class="radio"><input type="radio" name="sensitivity" value="0.7"> <span data-i18n="settings.often">Spesso: più prudente, più casi da controllare</span></label>
+        <label class="radio"><input type="radio" name="sensitivity" value="0.5"> <span data-i18n="settings.normal">Normale</span></label>
+        <label class="radio"><input type="radio" name="sensitivity" value="0.3"> <span data-i18n="settings.rarely">Raramente: meno casi da controllare</span></label>
       </fieldset>
-      <label class="checkbox"><input type="checkbox" id="use-memory"> Usa i ricordi per mostrare cosa avevi deciso nei casi simili</label>
+      <label class="checkbox"><input type="checkbox" id="use-memory"> <span data-i18n="settings.useMemory">Usa i ricordi per mostrare cosa avevi deciso nei casi simili</span></label>
       <label class="field">
-        <span class="field-label">Qualità delle immagini</span>
+        <span class="field-label" data-i18n="settings.quality">Qualità delle immagini</span>
         <select id="image-quality">
-          <option value="336">Veloce</option>
-          <option value="448">Normale</option>
-          <option value="672">Dettagliata</option>
-          <option value="896">Massima: per leggere testi e documenti (più lenta)</option>
+          <option value="336" data-i18n="settings.fast">Veloce</option>
+          <option value="448" data-i18n="settings.normalQuality">Normale</option>
+          <option value="672" data-i18n="settings.detailed">Dettagliata</option>
+          <option value="896" data-i18n="settings.max">Massima: per leggere testi e documenti (più lenta)</option>
         </select>
       </label>
       <p class="muted small" id="settings-info"></p>
-      <div class="dialog-actions"><button class="button primary" value="close">Fatto</button></div>
+      <div class="dialog-actions"><button class="button primary" value="close" data-i18n="settings.done">Fatto</button></div>
     </form>
   </dialog>
 
   <dialog id="name-dialog" aria-labelledby="name-title">
     <form method="dialog" class="dialog" id="name-form">
-      <h2 id="name-title">Salva le domande</h2>
+      <h2 id="name-title" data-i18n="sets.title">Salva le domande</h2>
       <label class="field">
-        <span class="field-label">Nome</span>
-        <input type="text" id="set-name" maxlength="60" placeholder="es. Messaggi dei clienti" required>
+        <span class="field-label" data-i18n="sets.name">Nome</span>
+        <input type="text" id="set-name" maxlength="60" placeholder="es. Messaggi dei clienti" data-i18n-placeholder="sets.namePlaceholder" required>
       </label>
       <div class="dialog-actions">
-        <button class="button ghost" value="cancel" formnovalidate>Annulla</button>
-        <button class="button primary" value="save">Salva</button>
+        <button class="button ghost" value="cancel" formnovalidate data-i18n="sets.cancel">Annulla</button>
+        <button class="button primary" value="save" data-i18n="sets.save">Salva</button>
       </div>
     </form>
   </dialog>
 
   <div class="toasts" id="toasts" aria-live="assertive"></div>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

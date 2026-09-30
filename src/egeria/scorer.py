@@ -8,19 +8,23 @@ Riuso dello stato: tutte le domande e le permutazioni su uno stesso stato inizia
 stesso prefisso (istruzioni + stato, immagini comprese). Il prefisso si calcola una volta con
 la cache; la cache ibrida (stato ricorrente e convoluzione dei layer DeltaNet, KV dei layer di
 attenzione) si duplica per le domande, e si passano in batch solo le code (domanda + opzioni).
+
+Correzione della tendenza al Sì: ogni domanda Sì/No si pone anche sullo stato vuoto "N/A"
+(una volta, poi resta in cache); se lì il modello pende verso il Sì, lo spostamento si toglie.
 """
 
 from __future__ import annotations
 
 import copy
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
 
-from .confidence import log_softmax
+from .confidence import log_softmax, remove_yes_shift, yes_bias_shift
 from .images import load_images
-from .prompt import LETTERS, build_messages, build_plain, orderings
+from .prompt import AUTO, LETTERS, build_messages, build_plain, orderings
 from .schema import Question, parse_request
 
 
@@ -34,6 +38,10 @@ SHARE_THRESHOLD_GPU_SMALL = 1000  # modelli testuali sotto SMALL_MODEL_PARAMETER
 SHARE_THRESHOLD_GPU = 500
 SHARE_THRESHOLD_CPU = 1
 SMALL_MODEL_PARAMETERS = 1.2e9
+# Stato vuoto per la correzione della tendenza al Sì (calibrazione a input vuoto, Zhao et al. 2021,
+# applicata solo verso il No): documentazione/09-controlli-senza-etichette.md §8–9.
+EMPTY_STATE = "N/A"
+EMPTY_CACHE_SIZE = 4096  # domande Sì/No di cui si ricorda lo spostamento
 
 _DISPATCH_INSTALLED = False
 _KERNEL_FUNCTIONS = (
@@ -84,6 +92,7 @@ class QuestionScore:
     option_logits: np.ndarray  # log-prob medie sulle permutazioni, nell'ordine originale delle opzioni
     order_argmax: list[int]  # argmax (indice originale) per ogni permutazione
     input_tokens: int
+    yes_shift: float = 0.0  # spostamento tolto dal logit del Sì (correzione della tendenza al Sì)
 
 
 class DecisionScorer:
@@ -168,6 +177,7 @@ class DecisionScorer:
         weight = self.model.get_output_embeddings().weight
         self.slot_weight = weight[self.slot_ids].detach().float()  # [26, d]
         self._check_boundary()
+        self._empty_yes: OrderedDict = OrderedDict()  # (domanda, permutazioni) -> spostamento verso il Sì
 
     # ------------------------------------------------------------------ prompt
 
@@ -307,7 +317,7 @@ class DecisionScorer:
 
     # --------------------------------------------------------------- decisioni
 
-    def score(self, state, questions: list[Question], permutations: int = 1) -> list[QuestionScore]:
+    def score(self, state, questions: list[Question], permutations: int | str = 1) -> list[QuestionScore]:
         """Punteggi per tutte le domande su uno stato, combinando le permutazioni delle opzioni."""
         plan, sequences, n_options = [], [], []
         for qi, question in enumerate(questions):
@@ -337,7 +347,7 @@ class DecisionScorer:
                                          input_tokens=sum(lengths[k] for k in parts)))
         return results
 
-    def score_images(self, state, questions: list[Question], permutations: int, images: list):
+    def score_images(self, state, questions: list[Question], permutations: int | str, images: list):
         """Readout a lettere con immagini nello stato: processore di Qwen3.5 + modello multimodale.
 
         Se conviene, istruzioni e stato (immagini comprese) si calcolano una volta sola e si
@@ -375,6 +385,35 @@ class DecisionScorer:
             lengths += inputs["attention_mask"].sum(1).tolist()
         return self._combine(questions, plan, lengths, finals)
 
+    def correct_yes_bias(self, scores: list[QuestionScore], permutations: int | str) -> list[QuestionScore]:
+        """Toglie alle domande Sì/No la tendenza al Sì misurata sullo stato vuoto.
+
+        La stessa domanda, con le stesse permutazioni, si pone sullo stato "N/A". Se lì il modello
+        pende verso il Sì, lo spostamento (in logit) si toglie dalla risposta; se pende verso il No
+        non si tocca nulla. Lo spostamento si calcola una volta per domanda e resta in cache: il
+        costo è una passata in più la prima volta che una domanda compare.
+        """
+        pending = {}
+        for s in scores:
+            if s.question.type == "noul":
+                key = (s.question.instructions, s.question.options, str(permutations))
+                if key not in self._empty_yes:
+                    pending.setdefault(key, s.question)
+        if pending:
+            empty = self.score(EMPTY_STATE, list(pending.values()), permutations)
+            for key, e in zip(pending, empty):
+                self._empty_yes[key] = yes_bias_shift(e.option_logits)
+        for s in scores:
+            if s.question.type != "noul":
+                continue
+            key = (s.question.instructions, s.question.options, str(permutations))
+            self._empty_yes.move_to_end(key)
+            s.yes_shift = self._empty_yes[key]
+            s.option_logits = remove_yes_shift(s.option_logits, s.yes_shift)
+        while len(self._empty_yes) > EMPTY_CACHE_SIZE:
+            self._empty_yes.popitem(last=False)
+        return scores
+
     def _state_boundary(self, texts: list[str]) -> int | None:
         """Posizione, uguale in tutti i prompt, subito dopo il blocco dello stato; None se non si può tagliare lì.
 
@@ -397,12 +436,16 @@ class DecisionScorer:
     def decide(
         self,
         body: dict,
-        permutations: int = 1,
+        permutations: int | str = AUTO,
         temperatures: dict[str, float] | None = None,
         default_min_confidence: float | None = None,
         memory=None,
+        yes_correction: bool = True,
     ) -> dict:
         """Risposta nel formato dell'API Jev per un body `/v1/systemone`.
+
+        Di default le opzioni passano per tutte le posizioni (`permutations="auto"`) e le domande
+        Sì/No hanno la correzione della tendenza al Sì (`yes_correction`).
 
         Ogni domanda con una soglia (`min_confidence`) riporta `status`: `decided`, oppure
         `uncertain` se la confidenza resta sotto la soglia. Le domande `open` leggono tutto il
@@ -430,13 +473,15 @@ class DecisionScorer:
         context = memory_context(body, questions, memory, embedding)
 
         # Domande con readout a lettere e domande aperte (vocabolario intero).
-        lettered = [q for q in questions if q.type != "open"]
-        opens = [q for q in questions if q.type == "open"]
+        lettered = [q for q in questions if q.type != "short_answer"]
+        shorts = [q for q in questions if q.type == "short_answer"]
         answers: dict[str, dict] = {}
         input_tokens = analysis_tokens
         if lettered:
             scores = self.score_images(state, lettered, permutations, images) if multimodal \
                 else self.score(state, lettered, permutations)
+            if yes_correction:
+                self.correct_yes_bias(scores, permutations)
             for s in scores:
                 q = s.question
                 p = softmax(s.option_logits, temperatures.get(q.readout, 1.0))
@@ -447,7 +492,7 @@ class DecisionScorer:
                     result["status"] = "decided" if decided else "uncertain"
                 answers[q.id] = result
                 input_tokens += s.input_tokens
-        for q, result, tokens in self.open_answers(state, opens, images):
+        for q, result, tokens in self.short_answers(state, shorts, images):
             answers[q.id] = result
             input_tokens += tokens
         response = {
@@ -459,17 +504,17 @@ class DecisionScorer:
         response["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return response
 
-    # ------------------------------------------------------------------ open
+    # ---------------------------------------------------------- short_answer
 
-    def open_answers(self, state, questions: list[Question], images=None):
+    def short_answers(self, state, questions: list[Question], images=None):
         """Risposta breve (una parola o un valore) dall'intero vocabolario, anche con immagini nello stato.
 
         Per ogni domanda: un prefill del prompt (con le immagini, se ci sono) che dà insieme i
         logit dell'ultima posizione e la cache; poi le candidate migliori si completano fino
         allo spazio successivo, così si leggono anche date, importi e codici ("25.03.1980", "14,21").
         """
-        from .confidence import merge_candidates, open_answer
-        from .prompt import build_open_messages
+        from .confidence import merge_candidates, short_answer
+        from .prompt import build_short_answer_messages
         from .schema import is_multimodal
 
         torch = self.torch
@@ -477,7 +522,7 @@ class DecisionScorer:
         results = []
         for q in questions:
             text = self.tokenizer.apply_chat_template(
-                build_open_messages(state, q), tokenize=False, add_generation_prompt=True, enable_thinking=False
+                build_short_answer_messages(state, q), tokenize=False, add_generation_prompt=True, enable_thinking=False
             )
             if is_multimodal(state):
                 inputs = self.processor(text=[text], images=images, return_tensors="pt").to(self.device)
@@ -494,7 +539,7 @@ class DecisionScorer:
             ids = [int(i) for i in top.indices.tolist() if self.tokenizer.decode([int(i)]).strip()]
             texts = self._complete_words(out.past_key_values, ids)
             candidates = [(texts[i], float(probs[i])) for i in ids]
-            results.append((q, open_answer(merge_candidates(candidates, q.params["top_k"])), int(inputs["input_ids"].shape[1])))
+            results.append((q, short_answer(merge_candidates(candidates, q.params["top_k"])), int(inputs["input_ids"].shape[1])))
         return results
 
     def _complete_words(self, cache, first_ids: list[int], max_tokens: int = 16) -> dict[int, str]:

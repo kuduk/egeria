@@ -2,7 +2,7 @@
 
 # Primitive di lettura oltre noul, choice e score
 
-> Stato: implementate e **verificate** `number` e `open` (§4), più il vettore semantico dello stato, che oggi si chiede solo con `POST /v1/embed` del server del modello.
+> Stato: implementate e **verificate** `estimate` e `short_answer` (§4), più il vettore semantico dello stato, che oggi si chiede solo con `POST /v1/embed` del server del modello. Fino al 29/09/2026 `estimate` e `short_answer` si chiamavano `number` e `open`: i vecchi nomi sono ancora accettati come sinonimi.
 >
 > **Tolte:**
 > - il 29/09/2026, per semplificare: `rank`, che è una `choice` con le opzioni ordinate per probabilità, ed `embed` dentro `/v1/systemone`;
@@ -25,8 +25,8 @@ Da qui si possono ricavare altre primitive senza generare testo.
 |---|---|---|---|
 | `multi` (tolta, vedi §4) | probabilità indipendente per ogni opzione | una `noul` per opzione, nello stesso batch | problemi presenti in un ticket |
 | `rank` (tolta il 29/09/2026) | ordinamento completo con probabilità | distribuzione della `choice`: basta ordinarla | riordinare documenti o azioni |
-| `number` (a intervalli) | valore atteso + intervallo | `score` con intervalli numerici come livelli | quante persone nell'immagine |
-| `open` | top-k su tutto il vocabolario | softmax sull'lm_head completo nell'ultima posizione | colore dell'auto, senza elencare le opzioni (risposte di un solo token) |
+| `estimate` (a intervalli) | valore atteso + intervallo | `score` con intervalli numerici come livelli | quante persone nell'immagine |
+| `short_answer` | top-k su tutto il vocabolario | softmax sull'lm_head completo nell'ultima posizione | colore dell'auto, senza elencare le opzioni (risposte di un solo token) |
 | vettore dello stato (`/v1/embed`) | vettore semantico dello stato | hidden finale (come Qwen3-Embedding) | ricerca di casi simili, deduplica, cambio di scena nel video |
 | ricordi simili (`memory.recall`) | i ricordi più simili (con decisioni e note) | ricerca nella memoria con il vettore dello stato | "cosa ti ricorda?" ([06-memoria.md](06-memoria.md) §7). Come tipo di domanda `recall` è stata tolta il 29/09/2026 |
 | `known` (non tenuta, abbandonata il 29/09/2026) | già visto / simile / nuovo | soglie sulla similarità con la memoria | "è qualcosa che hai in memoria?" ([06-memoria.md](06-memoria.md) §7) |
@@ -55,7 +55,7 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 | Soglia per domanda / astensione | ✗ | testa act/escalate non funzionante | ✓ `min_confidence` + `status` | ✓ |
 | Profondità dinamica | ✗ | ✗ | tolta il 29/09/2026 (guadagno reale zero-shot 0.5–4%) | – |
 | Stato con immagini | ✗ | ✗ | ✓ | ✓ |
-| `number`, `open` | ✗ (solo il valore atteso di `score`) | ✗ | ✓ zero-shot | ✓ |
+| `estimate`, `short_answer` | ✗ (solo il valore atteso di `score`) | ✗ | ✓ zero-shot | ✓ |
 | Vettore dello stato e memoria | ✗ | ✗ | ✓ (`/v1/embed`, `memory`) | ✓ |
 | `span`, `locate`, `value`, `tags` | ✗ | ✗ | – | con training |
 | Fine-tuning del cliente | ✗ | ✓ | ✓ | ✓ |
@@ -64,17 +64,17 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 ## 3. Priorità proposte
 
 1. **Il vettore dello stato per il video in tempo reale.** Il vettore del fotogramma è gratuito nello stesso passaggio: si fanno le domande solo quando la scena cambia.
-2. **`span`** (in roadmap, subito dopo F0.5): valori copiati alla lettera dallo stato, senza training. Il completamento di `open` accetta solo i token che continuano un pezzo presente nello stato, quindi la risposta non può essere inventata.
+2. **`span`** (in roadmap, subito dopo F0.5): valori copiati alla lettera dallo stato, senza training. Il completamento di `short_answer` accetta solo i token che continuano un pezzo presente nello stato, quindi la risposta non può essere inventata.
 3. **`locate`** (in roadmap, con l'indagine su destra/sinistra): "sì, qui" è molto più utile di "sì". Zero-shot, dalle coordinate che i modelli visivi Qwen sanno produrre.
 4. **`why`** (in roadmap, con l'interfaccia per gli operatori): le frasi dello stato che hanno deciso, togliendone una alla volta.
-5. **`open`**: economica e zero-shot. (`multi` abbandonata il 29/09/2026: si usano N domande Sì/No.)
+5. **`short_answer`**: economica e zero-shot. (`multi` abbandonata il 29/09/2026: si usano N domande Sì/No.)
 
 ## 4. Implementazione e verifica (zero-shot)
 
 | Tipo | Come è fatto | Risposta |
 |---|---|---|
-| `number` | readout ordinale come `score`, sugli intervalli; `null` = estremo aperto | `value` (valore atteso sui punti medi), `interval` (10–90%, uniforme a tratti), `range`, `probabilities`, `unit` |
-| `open` | softmax sull'intero vocabolario (token speciali esclusi). Le candidate si completano fino al confine di parola: un prefill + ≤4 token in greedy, cache duplicata | `answer`, `candidates` con `p` (probabilità del primo token), `confidence` |
+| `estimate` | readout ordinale come `score`, sugli intervalli; `null` = estremo aperto | `value` (valore atteso sui punti medi), `interval` (10–90%, uniforme a tratti), `range`, `probabilities`, `unit` |
+| `short_answer` | softmax sull'intero vocabolario (token speciali esclusi). Le candidate si completano fino al confine di parola: un prefill + ≤4 token in greedy, cache duplicata | `answer`, `candidates` con `p` (probabilità del primo token), `confidence` |
 | vettore dello stato (`POST /v1/embed`) | media degli hidden finali sui token dello stato, normalizzata | `embedding`, `embedding_dim` |
 
 **Verifica** ([scripts/verifica_primitive.py](../scripts/verifica_primitive.py), 2B-Base, soglie decise prima dei risultati). Si tiene una primitiva solo se supera la soglia.
@@ -82,8 +82,8 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 | Primitiva | Prova | Soglia | Risultato | Esito |
 |---|---|---|---|---|
 | `rank` | 4 situazioni con azione prioritaria ovvia | ≥ 3/4 | **4/4** | tenuta, poi tolta il 29/09/2026: la stessa prova oggi si fa con `choice` |
-| `number` | 5 quantità scritte nel testo (giorni, persone, euro, kg, minuti) | ≥ 4/5 nell'intervallo | **5/5** (15.4 persone, 1.303 €, 7.7 kg, 39 min) | tenuta |
-| `open` | 6 risposte di una parola (giorno, lingua, città, colore, mese, cognome) | ≥ 5/6 | **6/6** | tenuta |
+| `estimate` | 5 quantità scritte nel testo (giorni, persone, euro, kg, minuti) | ≥ 4/5 nell'intervallo | **5/5** (15.4 persone, 1.303 €, 7.7 kg, 39 min) | tenuta |
+| `short_answer` | 6 risposte di una parola (giorno, lingua, città, colore, mese, cognome) | ≥ 5/6 | **6/6** | tenuta |
 | `embed` | recupero di casi con le stesse decisioni (kNN su typed-decisions) | meglio della Prior | **0.564** contro 0.478, come Qwen3-Embedding-0.6B | tenuta (oggi con `/v1/embed` e la memoria) |
 | `surprise` | 6 testi normali contro 6 anomali | AUROC ≥ 0.85 | **0.50** | **tolta** |
 | `multi` | ticket e foto | – | 0.8B: "sì" a quasi tutto (bias verso il sì, non correggibile con la temperatura) | **tolta** |
@@ -94,7 +94,7 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 - solo il testo casuale e le parole mescolate risultano "sorprendenti".
 
 **Limiti noti delle primitive tenute:**
-- `open` risponde con una sola "parola" o un valore. La probabilità riguarda il primo token; il completamento prosegue fino al primo spazio (entro 16 token), così date, importi e codici escono interi (una data completa nel formato "gg.mm.aaaa", l'importo "14,21"). Funziona anche con le immagini ([04-stato-con-immagini.md](04-stato-con-immagini.md) §7).
+- `short_answer` risponde con una sola "parola" o un valore. La probabilità riguarda il primo token; il completamento prosegue fino al primo spazio (entro 16 token), così date, importi e codici escono interi (una data completa nel formato "gg.mm.aaaa", l'importo "14,21"). Funziona anche con le immagini ([04-stato-con-immagini.md](04-stato-con-immagini.md) §7).
 - il vettore dello stato costa un passaggio in più sullo stato.
 
 ## 5. Esempi d'uso
@@ -103,15 +103,15 @@ Tutti gli esempi sono in [examples/primitive/](../examples/primitive/). Gli outp
 
 > **`rank` non c'è più** (29/09/2026). Per ordinare delle opzioni si usa `choice`: restituisce già la probabilità di ognuna, e ordinarle è una riga di codice. La domanda "Quale azione va fatta per prima?" di [examples/primitive_it.json](../examples/primitive_it.json) ora è una `choice`.
 
-### `number`: stimare una quantità
+### `estimate`: stimare una quantità (nell'interfaccia *Una stima*)
 
 ```bash
-.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base --permutations 2 examples/primitive/number.json
+.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base --permutations 2 examples/primitive/estimate.json
 ```
 
 ```json
 {"state": "Riunione di progetto: 12 persone in sala A e altre 3 collegate da remoto. Due colleghi hanno avvisato che arriveranno in ritardo.",
- "questions": {"partecipanti": {"type": "number",
+ "questions": {"partecipanti": {"type": "estimate",
    "instructions": "Quante persone partecipano in totale alla riunione, contando anche chi è collegato?",
    "criteria": {"bins": [0, 5, 10, 14, 16, 20, null], "unit": "persone"}}}}
 ```
@@ -120,7 +120,7 @@ Tutti gli esempi sono in [examples/primitive/](../examples/primitive/). Gli outp
 - Si può passare anche solo la lista: `"criteria": [0, 5, 10, 14, 16, 20, null]`.
 
 ```json
-"partecipanti": {"type": "number", "value": 14.59, "interval": [10.86, 18.97], "range": "14-16",
+"partecipanti": {"type": "estimate", "value": 14.59, "interval": [10.86, 18.97], "range": "14-16",
   "probabilities": {"0-5": 0.014, "5-10": 0.028, "10-14": 0.273, "14-16": 0.460, "16-20": 0.168, ">=20": 0.057},
   "confidence": 0.565, "unit": "persone"}
 ```
@@ -132,24 +132,34 @@ Tutti gli esempi sono in [examples/primitive/](../examples/primitive/). Gli outp
 
 Gli intervalli vanno scelti in base alla precisione che serve: più sono stretti, più la domanda è difficile.
 
-### `open`: risposta di una parola, senza elencare le opzioni
+**`estimate` stima, non legge** (prova del 29/09/2026, 2B, lettura di default). Sul totale dello scontrino di prova (14,21 €), con intervalli di 10 € da 0 a 50:
+- a 448 px l'intervallo più probabile è sbagliato (20–30, 30%), con `value` 27.6;
+- a 800 px è giusto (10–20, 45%), ma `value` è 23.4.
+
+La distribuzione è larga, e l'intervallo aperto in cima ("50 o più", contato come 50) trascina la media fuori dall'intervallo più probabile. La stessa domanda come `short_answer` legge **14,21** con confidenza 0.98–0.99 a entrambe le risoluzioni. Quindi:
+- `short_answer` per un numero scritto nello stato (totali, date, codici);
+- `estimate` per una quantità da stimare (persone, età, distanze).
+
+L'interfaccia lo suggerisce sotto le domande "Una stima" ([07](07-interfaccia.md) §3).
+
+### `short_answer`: risposta breve, senza elencare le opzioni (nell'interfaccia *Una risposta breve*)
 
 ```bash
-.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base examples/primitive/open.json
+.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base examples/primitive/short_answer.json
 ```
 
 ```json
 {"state": "Buongiorno, sono tre giorni che i pagamenti ... Abbiamo stipendi da pagare venerdì. ...",
  "questions": {
-   "giorno": {"type": "open", "instructions": "Entro quale giorno della settimana vanno pagati gli stipendi?", "top_k": 3},
-   "lingua": {"type": "open", "instructions": "In che lingua è scritto il messaggio?", "top_k": 3}}}
+   "giorno": {"type": "short_answer", "instructions": "Entro quale giorno della settimana vanno pagati gli stipendi?", "top_k": 3},
+   "lingua": {"type": "short_answer", "instructions": "In che lingua è scritto il messaggio?", "top_k": 3}}}
 ```
 
 ```json
-"giorno": {"type": "open", "answer": "Venerdì",
+"giorno": {"type": "short_answer", "answer": "Venerdì",
   "candidates": [{"text": "Venerdì", "p": 0.779}, {"text": "domenica", "p": 0.061}, {"text": "Giovedì", "p": 0.034}],
   "confidence": 0.779},
-"lingua": {"type": "open", "answer": "Italiano",
+"lingua": {"type": "short_answer", "answer": "Italiano",
   "candidates": [{"text": "Italiano", "p": 0.913}, {"text": "Italieno", "p": 0.040}, {"text": "IT", "p": 0.018}],
   "confidence": 0.913}
 ```
@@ -192,4 +202,4 @@ response = scorer.decide(body, permutations=2, temperatures=temperatures)
 print(response["answers"]["priorita"]["choice"], response["answers"]["giorni"]["value"])
 ```
 
-Le temperature si applicano per readout: `number` usa quella delle `score`. `open` non è calibrata.
+Le temperature si applicano per readout: `estimate` usa quella delle `score`. `short_answer` non è calibrata.

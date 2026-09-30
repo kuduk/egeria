@@ -41,6 +41,7 @@ Molte pagine sono state lette tramite riassunti automatici. Prima di citare un n
 - Codice: https://github.com/NandhaKishorM/laya
   - Issue citate: #131, #156, #185, #186, #377
   - Letti il 28/09/2026 (commit 9d95567): `laya/common.py` (`proper_reward`, `td_lambda_targets`), `laya/shortlist.py`, `docs/finetune.md`, `docs/finetune_browser_agent.md`, `research/eval/metamorphic.py`, `research/eval/presentation_checks.py`, `research/scripts/confidence_definitions.py`
+  - Letti il 29/09/2026 per i controlli senza etichette: `research/eval/presentation_checks.py`, `research/eval/README.md`, `BENCHMARKS.md` (cambi di risposta con l'ordine e fra varianti del cinese)
 - Runtime TypeScript/ONNX: https://github.com/receptron/laya (commit 6478649, 21/09/2026)
 - Agente web fine-tuned: https://huggingface.co/cklxx/laya-browser
 - Modelli: https://huggingface.co/convaiinnovations/laya · https://huggingface.co/convaiinnovations/laya-typed-decisions · https://huggingface.co/convaiinnovations/laya-multilingual
@@ -51,6 +52,7 @@ Molte pagine sono state lette tramite riassunti automatici. Prima di citare un n
 
 ## SemIf e altre repliche
 - SemIf: https://github.com/TheoLeeCJ/SemIf
+  - Letti il 29/09/2026 (commit 23cf1f3): `benchmarks/build_perturbations.py`, `benchmarks/evaluate.py` (criterio rovesciato, stati senza l'informazione), `docs/RESULTS.md`, `docs/CALIBRATION.md`
 - Kev: https://github.com/jaredpalmer/kev
 - Open-Jev: https://github.com/Zefan-Cai/Open-Jev · https://huggingface.co/ZefanCai/Open-Jev-27B-v1.1
 - decider: https://github.com/Mapika/decider
@@ -65,6 +67,14 @@ Molte pagine sono state lette tramite riassunti automatici. Prima di citare un n
 - GLiNER2.5-Decide: https://fastino.ai/blog/gliner-2-5-decide-open-weight-decision-model · https://huggingface.co/fastino/GLiNER2.5-Decide
 - Servizi: https://meragpt.com/models/state-decider-1 · https://simple-jev.featherless.ai
 - Indice della community: https://github.com/Amal-David/awesome-jev
+
+## CLM (Stanford + NVIDIA)
+- Codice: https://github.com/Contrastive-LM/CLM
+  - Letti il 29/09/2026 (commit bb42c6c): `src/clm/schema.py`, `engine.py`, `heads.py`, `embedder.py`, `train/finetune.py`, `train/adapters.py`, `evaluation/bon_eval.py`, `docs/FINETUNING.md`, `examples/t_rex/` (compresi `results/*_realtime.json`)
+- Pesi e schede: https://huggingface.co/Contrastive-LM/CLM-v0.1-8B · https://huggingface.co/Contrastive-LM/deepswe-clm-heads-8k (`verification.json`, `split_summary.json`) · https://huggingface.co/Contrastive-LM
+- Blog: https://contrastive-lm.notion.site (non leggibile in automatico il 29/09/2026)
+- Articoli: https://venturebeat.com/technology/stanford-and-nvidias-open-clm-8b-caches-reusable-agent-actions-and-runs-up-to-9x-faster-than-jev-in-tests · https://aimag.no/en/nyheter/new-open-model-from-stanford-and-nvidia-picks-agent-actions-by-matching-not-token-generation · https://www.neoteo.com/en/stanford-and-nvidia-release-clm-8b-to-rank-ai-agent-actions · https://pasqualepillitteri.it/en/news/19074/clm-8b-nvidia-stanford-jev-en · https://www.kucoin.com/news/flash/stanford-and-nvidia-open-source-clm-8b-9x-faster-than-jev-in-decision-making · https://pro.edgex.exchange/news/article/stanford-nvidia-clm-8b-9x-faster-ai-agents
+- Segnalazioni della community: https://github.com/bianzhilong2-ctrl/agents-radar/issues/1336 · https://github.com/kouweizhu/agents-radar/issues/240
 
 ## Benchmark
 - JevBench: https://github.com/fstandhartinger/jevbench
@@ -140,3 +150,17 @@ Molte pagine sono state lette tramite riassunti automatici. Prima di citare un n
 - CALM: https://arxiv.org/html/2510.27688
 - Beyond Tokens: https://arxiv.org/html/2601.11791
 - Coconut: https://arxiv.org/html/2412.06769v3
+
+## Posizione delle opzioni, "Sì" e lingua (ricerca del 29/09/2026)
+- PriDe, Zheng et al., ICLR 2024: https://arxiv.org/abs/2309.03882
+- Bias node pruning and auxiliary options, Choi et al., ACL 2025: https://arxiv.org/abs/2409.18857 · https://aclanthology.org/2025.acl-long.259.pdf
+- Permutation bias metric, LoRA and KV-cached majority voting, Guda et al., IJCNLP-AACL 2026: https://arxiv.org/abs/2511.21709
+- PA-GRPO, Zheng et al., ACL 2026: https://arxiv.org/abs/2603.21016
+- MCQA selection bias in vision-language models: https://arxiv.org/pdf/2509.16805
+- Acquiescence bias in LLMs, Braun, EMNLP Findings 2025: https://aclanthology.org/2025.findings-emnlp.607.pdf · https://arxiv.org/pdf/2509.08480
+- Yes-no bias, answer order and wording, Huang, 2026: https://arxiv.org/abs/2607.05552
+- Contrast-Consistent Search, Burns et al., ICLR 2023: https://arxiv.org/abs/2212.03827
+- Calibrate Before Use, Zhao et al., ICML 2021: https://arxiv.org/abs/2102.09690
+- Batch Calibration, Zhou et al., ICLR 2024: https://arxiv.org/abs/2309.17249
+- RankC, cross-lingual consistency, Qi et al., EMNLP 2023: https://arxiv.org/abs/2310.10378
+- Cross-lingual self-consistency, 2026: https://arxiv.org/html/2606.01464
