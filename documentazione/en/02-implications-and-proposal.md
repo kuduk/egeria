@@ -11,8 +11,16 @@
 | 26/09/2026 | **Backbone: Qwen3.5 family** (like SemIf), not Qwen3.8 | Qwen3.8 has no small sizes and no Base checkpoints. Qwen3.5 has the same architecture. Qwen3.8-27B remains a candidate teacher |
 | 26/09/2026 | **Start from the zero-shot F0 baseline**: readout of the letter logits, no training | Sets the reference to beat with LoRA and distillation. Implemented, see [03-baseline-f0.md](03-baseline-f0.md) |
 | 26/09/2026 | **Development hardware: RTX 4070 Laptop (8 GB), WSL2** | 0.8B and 2B fit in bf16. 4B and 9B only quantized to 4 bits, or on a cloud GPU |
-| 26/09/2026 | **New direction: dynamic depth per assertion** (§4bis) | The user's idea. It fits a single-forward-pass model well |
-| 26/09/2026 | **Per-assertion `min_confidence` + global field** (§4bis) | The caller knows the cost of an error. The local value overrides the global one; by default the full model is used |
+| 26/09/2026 | **New direction: dynamic depth per assertion** (§4bis), abandoned on 29/09/2026 | The user's idea. It fits a single-forward-pass model well |
+| 26/09/2026 | **Per-assertion `min_confidence` + global field** (§4bis) | The caller knows the cost of an error. The local value overrides the global one. Since 29/09/2026 it only flags uncertain answers (`status`) |
+| 28/09/2026 | **Italian and English on an equal footing** | The documentation is in both languages too |
+| 28/09/2026 | **Generalist, but the first LoRA on a specific image task** | Images are the project's strongest point; a single task makes it clear what worked |
+| 28/09/2026 | **One model size at a time** | Because of the 8 GB GPU, and to avoid confounding the effects |
+| 28/09/2026 | **Name: Egeria** (formerly semLMM) | Numa's advisor nymph: a small, quick advisor for whoever decides |
+| 29/09/2026 | **Simplification:** removed dynamic depth, `rank`, the `recall` question, `embed` inside `/v1/systemone`, `inject` | Real gain too small (dynamic depth, `inject`) or duplicates of something that stays (`rank` = sorted `choice`; `recall` = `memory.recall`; `embed` = `/v1/embed`) |
+| 29/09/2026 | **`multi` and `known` abandoned as primitives** | `multi` is equivalent to N Yes/No questions, which are cheap with state reuse. For `known`, what remains is the out-of-domain calibration measurement (F0.5) and `memory.min_similarity` |
+| 29/09/2026 | **Three new zero-shot primitives on the roadmap: `span`, `locate`, `why`** (§6) | Each gives something that cannot be obtained by combining the existing ones: an answer anchored to the text of the state, a position in the image, the reason behind a decision |
+| 29/09/2026 | **Left/right out of the checks and out of the first LoRA** | According to the user, something is fundamentally wrong there: the example needs to be re-examined in a separate investigation |
 
 ## 1. What changes compared with the initial idea ("start from Qwen 3.8")
 
@@ -78,6 +86,8 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 
 ## 4bis. Dynamic depth per assertion
 
+> **Abandoned on 29/09/2026.** Zero-shot, the real gain was only 0.5–4% (step 1 of the plan), and block-wise execution complicated the scorer: the code has been removed. `min_confidence` remains and flags uncertain answers. The section is kept as a record of the idea.
+
 **Idea.** Each assertion (question) uses only the depth it needs. After each block of the model, the distribution over the options is read out. If the confidence *calibrated for that layer* exceeds a threshold, we exit; otherwise we continue. Easy questions cost a few layers, hard ones the whole model.
 
 **Why it fits this project well.**
@@ -93,9 +103,9 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 
 **Plan.**
 1. **F0 (done).** Zero-shot diagnostics: readout at every block boundary, temperatures per (type, layer), simulation of different thresholds → compute/accuracy curve. Result: the potential (oracle) saving is 27–36%, while the saving achieved with zero-shot confidence is only 0.5–4%, always with 100% agreement with the full model. See [03-baseline-f0.md](03-baseline-f0.md) §6.2.
-2. **API and real exit (done).** Per-assertion `min_confidence` parameter, with a global field in the request and a server default. The local value overrides the global one; with no threshold, the conservative default applies, i.e. the full model. Block-by-block execution with removal of the questions already decided; the response carries `depth` and `status` (`decided`/`uncertain`). The threshold applies to the chance-corrected confidence (0 = chance, 1 = certainty). Latency measurement: the request waits for the deepest question. On GPU the latency gain only materializes if all questions exit; on CPU it is proportional. See [03-baseline-f0.md](03-baseline-f0.md) §6.4.
-3. **F1.** Trained exit heads at every block boundary, with a proper loss on all exits. Threshold chosen with conformal risk control, so that `min_confidence` becomes an empirical accuracy guarantee.
-4. **F3.** Multi-level cascade: early exit → full model → larger model or thinking → human escalation. `status: uncertain` is the entry signal.
+2. **API and real exit (done, then removed on 29/09/2026; `min_confidence` with `status` remains).** Per-assertion `min_confidence` parameter, with a global field in the request and a server default. The local value overrides the global one; with no threshold, the conservative default applies, i.e. the full model. Block-by-block execution with removal of the questions already decided; the response carries `depth` and `status` (`decided`/`uncertain`). The threshold applies to the chance-corrected confidence (0 = chance, 1 = certainty). Latency measurement: the request waits for the deepest question. On GPU the latency gain only materializes if all questions exit; on CPU it is proportional. See [03-baseline-f0.md](03-baseline-f0.md) §6.4.
+3. **F1 (no longer planned).** Trained exit heads at every block boundary, with a proper loss on all exits. Threshold chosen with conformal risk control, so that `min_confidence` becomes an empirical accuracy guarantee.
+4. **F3 (no longer planned in its block-wise form).** Multi-level cascade: early exit → full model → larger model or thinking → human escalation. `status: uncertain` is the entry signal.
 
 ## 5. Proposed evaluation
 
@@ -110,13 +120,13 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 - **Metrics:** accuracy, NLL, Brier, ECE (declared binning), coverage at 5% error, p50/p95 latency of the model alone.
 - **Baselines to beat:** SemIf zero-shot (same backbone), Kev-4B/9B, decider-4b, Laya-multilingual, Jev (via API, if there is budget).
 
-## 5bis. Current limitations of Egeria (September 2026)
+## 5bis. Current limitations of Egeria (updated on 29/09/2026)
 
 - **Zero-shot on typed-decisions we are at the level of the prior:** 0.468 vs 0.478. Above Laya base (0.362), but below a trivial baseline. What beats the prior is the memory vote (0.562).
-- **Cost linear in the number of questions, and doubled for permutations.** The state is reprocessed for every question and every permutation, even though the format (state before the question) would allow computing it once.
+- **Cost per question and per permutation:** partly solved on 29/09/2026 with state reuse ([08-state-reuse.md](08-state-reuse.md)). With images the time drops by up to 80%; on short texts on GPU the fixed cost of each pass remains, and `open` questions do not share the prefix yet.
 - **Calibration does not transfer.** The typed-decisions temperatures make generic questions and images worse, there is no bias term (shift), and the yes-bias is not measured.
-- **The latency profile differs from Laya's.** A 0.8–2B LLM costs more per token than a 421M encoder; the possible compensation is state reuse.
-- **Dynamic depth** with little real gain zero-shot; **at most 26 options**; `inject`, `known` and `surprise` have no effect zero-shot.
+- **The latency profile differs from Laya's.** A 0.8–2B LLM costs more per token than a 421M encoder; state reuse partly compensates (done, [08](08-state-reuse.md)).
+- **At most 26 options** per question (one letter per option); `known` and `surprise` have no effect zero-shot.
 
 **Priorities for improving the model, cheapest first:**
 1. **State reuse across questions** (prefix-fork, including images).
@@ -124,16 +134,28 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 3. **Temperature + bias term (shift) calibration per option-count band**, evaluated out of domain.
 4. **F1** with a supervised proper loss, anti-shortcut data, permutations with a consistency loss, soft human labels.
 
-## 6. Indicative roadmap
+## 6. Roadmap (revised on 29/09/2026)
 
-| Phase | Goal | Output |
-|---|---|---|
-| F0 | Setup and zero-shot baseline: letter logits on Qwen3.5 (0.8B/2B in bf16, 4B/9B in 4 bits) and dynamic-depth diagnostics | **Completed**: no small model beats the Prior zero-shot; dynamic depth with 27–36% potential saving (see [03-baseline-f0.md](03-baseline-f0.md) §6) |
-| F1 | LoRA + pointer head on public data, exit heads for dynamic depth. Plus the deferred primitives: `multi` (proper loss per option) and `known` (proper loss on same/similar/new pairs + contrastive embedding with LoRA), see [06-memory.md](06-memory.md) §7 | First checkpoint and comparison with Kev/decider |
-| F2 | Soft distillation from Qwen3.8-27B and Italian set | Multilingual v1 checkpoint |
-| F3 | Calibration, abstention, order invariance | Risk–coverage report |
-| F4 | Serving: prefix-fork, Jev-compatible API, quantization, progressive responses (per-question streaming) and continuous batching at block level | Inference server |
-| F5 (opt.) | RL with real feedback; LLM-JEPA auxiliary loss | Ablation |
+| Phase | What | Where | Criterion for "done" |
+|---|---|---|---|
+| F0 | Setup and zero-shot baseline: letter logits on Qwen3.5 (0.8B/2B in bf16, 4B/9B in 4 bits) and dynamic-depth diagnostics | Locally | **Completed**: no small model beats the Prior zero-shot (see [03-baseline-f0.md](03-baseline-f0.md) §6) |
+| Simplification | Removed dynamic depth, `rank`, the `recall` question, `embed` inside `/v1/systemone`, `inject` | Locally | **Completed on 29/09/2026**: tests green, interface re-tested, model runs on text, images and memories |
+| **F0.5**, measure and speed up without training | 1) **State reuse** across questions and permutations, text and images: **done on 29/09/2026** ([08-state-reuse.md](08-state-reuse.md)). 2) **Label-free checks:** position (identical options), "Yes" (a question and its negation), language (the same question in Italian and in English). 3) **Calibration** temperature + bias term (shift) per type, separate for text and images, evaluated out of domain. 4) **Evaluation sets** in Italian and English: the one for the first LoRA plus a small generic text set | Locally | Same answers with lower latency. One number for each check. Decision on 1 or 2 permutations |
+| **New primitives** (zero-shot) | 1) **`span`**, right after F0.5: a piece of text copied verbatim from the state (invoice number, IBAN, name, date). It is the `open` completion restricted to tokens that continue a piece present in the state, so it cannot make things up. Text states only. 2) **`locate`**, together with the left/right investigation: a box or a point in the image, from the coordinates that Qwen vision models can produce (about twenty generated tokens). 3) **`why`**, when working on the operator interface: the sentences of the state that drove the decision, found by removing one at a time and measuring how much the probability changes (N passes in one batch; text only at first) | Locally | Each has a test set and a threshold fixed **before** the results, and is kept only if it passes. For `span`: accuracy at least equal to `open` on the same set, and zero answers that are not in the state |
+| **F1**, first LoRA on an image task | Task to be chosen (§7). Letter readout unchanged; soft CE + Brier loss; augmentations: permutations, negations; Italian and English. A single size: 2B if it fits in 8 GB, otherwise 0.8B | Locally | Better than zero-shot on the task. Fewer spurious "Yes" answers. No regression on text or on `suite_immagini` |
+| **F2**, generalist LoRA | Text and images, Italian and English. Human labels (including multi-annotator ones, e.g. ChaosNLI) and the typed-decisions train split. Anti-shortcut data (§4) | Locally | Above the prior (0.478) and the memory vote (0.562), towards 0.766. No out-of-domain regression |
+| **F3**, scale | 4B/9B models, labels from a large teacher alongside the human ones | Rented GPU | Only if F2 shows a gain |
+
+**Parked:** trained dynamic depth, the model as an actuator (games, robots), streaming and continuous batching in the server.
+
+**Usage examples to add to the documentation** (no new code):
+- **"It cannot be told":** a `choice` with an explicit "the state does not say" option instead of a `noul`. It gives the model a way out instead of a forced "Yes"; the yes-bias check in F0.5 will show how much it helps.
+- **Two frames or two cases in the same state,** with a `noul` "has anything changed?" or "is it the same case?". To be verified.
+
+**Separate investigation:** left/right in images, starting from the user's example. Leads to check:
+- `load_images` does not apply the EXIF orientation;
+- "right" is ambiguous (the person's right or the viewer's);
+- the webcam frame compared with what the user sees.
 
 ## 7. Open decisions
 
@@ -142,7 +164,14 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
    - LoRA on 4B/9B: 48–80 GB.
 
    To be decided: provider and budget.
-2. **Target language.** Italian first, or English?
-3. **Scope.** Generalist model (like Jev) or vertical on a specific domain?
-4. **Jev API compatibility.** F0 is already compatible with the request and response format. Still to decide: whether to also expose an HTTP server `/v1/systemone`.
+2. **Target language.** Decided on 28/09/2026: Italian and English on an equal footing.
+3. **Scope.** Decided on 28/09/2026: generalist, with the first LoRA on a specific image task.
+4. **Jev API compatibility.** Done: `/v1/systemone` is exposed by both the model server and the web server.
 5. **License and publication.** Open release (Apache-2.0) or internal use?
+6. **Task for the first LoRA (F1).** Candidates:
+   - **dance poses:** AIST++, with labels computed from the body keypoints and phrased without left/right; the classic named poses as the evaluation set;
+   - **Galaxy Zoo:** multiple-choice questions with the volunteers' vote fractions, i.e. true human probabilities;
+   - **spatial relations (VSR):** only after the left/right investigation.
+
+   To check for all of them: license and size.
+7. **`multi` and `known`.** Decided on 29/09/2026: abandoned as primitives (§0).

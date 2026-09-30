@@ -1,13 +1,19 @@
-"""Memoria a lungo termine: ricordi richiamati per somiglianza e messi nel contesto.
+"""Memoria a lungo termine: ricordi richiamati per somiglianza.
 
 Un ricordo è uno stato passato con le decisioni prese (idealmente confermate da un
 esito o da una correzione umana) e una nota libera opzionale. Si indicizza con
 l'embedding dello stato (`DecisionScorer.analyze_state`, media sui token) e si
-richiama per similarità coseno. I ricordi richiamati entrano nel prompt prima dello
-stato corrente, così il modello decide avendoli sott'occhio (in-context).
+richiama per similarità coseno. I ricordi richiamati tornano nella risposta, e le loro
+decisioni votano sulle domande che coprono. Non entrano nel prompt: zero-shot non
+migliorava le decisioni (documentazione/06-memoria.md).
 
 Gli hidden state di un LLM sono anisotropi: tutte le coppie hanno coseno alto.
 Con abbastanza ricordi si sottrae la media dell'archivio prima del coseno.
+
+I vettori dipendono dal modello che li ha calcolati. L'archivio registra quel modello
+(`store.json`): se il modello cambia, i vettori si ricalcolano dagli stati dei ricordi
+(`ensure_model`). I ricordi che non si possono ricalcolare (per esempio un'immagine
+cancellata) passano in `memories-sospese.jsonl`, fuori dalla ricerca ma non persi.
 """
 
 from __future__ import annotations
@@ -22,7 +28,8 @@ import numpy as np
 from .schema import render_value
 
 CENTER_MIN_ITEMS = 20
-MAX_STATE_CHARS = 600
+STORE_FILE = "store.json"
+SUSPENDED_FILE = "memories-sospese.jsonl"
 # Il voto usa fino a 10 ricordi: con meno è troppo sicuro (typed-decisions: NLL 1.22 con 3, 0.96 con 10).
 VOTE_K = 10
 VOTE_SMOOTHING = 0.1
@@ -38,18 +45,6 @@ class Memory:
     decisions: dict[str, str] = field(default_factory=dict)
     note: str = ""
     meta: dict = field(default_factory=dict)
-
-    def render(self, max_chars: int = MAX_STATE_CHARS) -> str:
-        """Testo del ricordo per il prompt: stato (troncato), decisioni e nota."""
-        state = describe_state(self.state)
-        if len(state) > max_chars:
-            state = state[:max_chars] + " [...]"
-        parts = [f"State: {state}"]
-        if self.decisions:
-            parts.append("Decisions: " + "; ".join(f"{k} = {v}" for k, v in self.decisions.items()))
-        if self.note:
-            parts.append(f"Note: {self.note}")
-        return "\n".join(parts)
 
 
 def describe_state(state: Any) -> str:
@@ -73,14 +68,25 @@ class MemoryStore:
         self.items: list[Memory] = []
         self.vectors = np.zeros((0, 0), dtype=np.float32)
         self._profile: np.ndarray | None = None
+        self.model: str | None = None  # modello che ha calcolato i vettori (None: archivio senza registrazione)
+        self.suspended: list[dict] = []  # sospesi in questa sessione, da aggiungere al file al prossimo save
+        self.suspended_count = 0  # sospesi in tutto, file compreso
 
     def __len__(self) -> int:
         return len(self.items)
+
+    @property
+    def dim(self) -> int:
+        """Dimensione dei vettori (0 se l'archivio è vuoto)."""
+        return int(self.vectors.shape[1]) if self.items else 0
 
     def add(self, vector, memory: Memory) -> None:
         vector = np.asarray(vector, dtype=np.float32)[None, :]
         if any(item.id == memory.id for item in self.items):
             raise ValueError(f"ricordo {memory.id!r} già presente")
+        if self.items and vector.shape[1] != self.dim:
+            raise ValueError(f"vettore da {vector.shape[1]} dimensioni in un archivio da {self.dim}: "
+                             "l'archivio va ricalcolato con ensure_model")
         self.vectors = vector if not len(self.items) else np.concatenate([self.vectors, vector])
         self.items.append(memory)
         self._profile = None
@@ -153,6 +159,30 @@ class MemoryStore:
                 break
         return found
 
+    def reforge(self, embed, model: str | None) -> dict:
+        """Ricalcola il vettore di ogni ricordo con `embed(stato)`, cioè con un altro modello.
+
+        I ricordi il cui stato non si può più leggere (immagine cancellata, stato non valido)
+        passano fra i sospesi. Se `embed` fallisce per altri motivi (per esempio il modello non
+        risponde), l'errore si propaga e l'archivio resta com'era.
+        """
+        from .schema import RequestError
+
+        vectors, kept, suspended = [], [], []
+        for item in self.items:
+            try:
+                vectors.append(np.asarray(embed(item.state), dtype=np.float32))
+                kept.append(item)
+            except (RequestError, OSError, ValueError) as error:
+                suspended.append({"memory": asdict(item), "reason": str(error), "model": model})
+        self.items = kept
+        self.vectors = np.stack(vectors) if vectors else np.zeros((0, 0), dtype=np.float32)
+        self.model = model
+        self._profile = None
+        self.suspended.extend(suspended)
+        self.suspended_count += len(suspended)
+        return {"action": "reforged", "model": model, "reforged": len(kept), "suspended": len(suspended)}
+
     def save(self, directory: str | Path) -> None:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
@@ -160,11 +190,21 @@ class MemoryStore:
         with (directory / "memories.jsonl").open("w") as handle:
             for item in self.items:
                 handle.write(json.dumps(asdict(item), ensure_ascii=False) + "\n")
+        (directory / STORE_FILE).write_text(json.dumps({"model": self.model, "dim": self.dim}, indent=2))
+        if self.suspended:
+            with (directory / SUSPENDED_FILE).open("a") as handle:
+                for entry in self.suspended:
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self.suspended = []
 
     @classmethod
     def load(cls, directory: str | Path) -> "MemoryStore":
         directory = Path(directory)
         store = cls()
+        if (directory / STORE_FILE).exists():
+            store.model = json.loads((directory / STORE_FILE).read_text()).get("model")
+        if (directory / SUSPENDED_FILE).exists():
+            store.suspended_count = sum(1 for line in (directory / SUSPENDED_FILE).read_text().splitlines() if line)
         if not (directory / "memories.jsonl").exists():
             return store
         store.vectors = np.load(directory / "vectors.npy")
@@ -172,6 +212,23 @@ class MemoryStore:
         if len(store.items) != len(store.vectors):
             raise ValueError(f"archivio incoerente in {directory}: {len(store.items)} ricordi, {len(store.vectors)} vettori")
         return store
+
+
+def ensure_model(store: MemoryStore, model: str | None, dim: int, embed) -> dict:
+    """Rende l'archivio confrontabile con i vettori di `model` (dimensione `dim`).
+
+    - archivio vuoto, oppure registrato senza modello ma con la stessa dimensione: si registra `model`;
+    - stesso modello e stessa dimensione: niente da fare;
+    - modello o dimensione diversi: si ricalcolano tutti i vettori con `embed(stato)`.
+
+    Restituisce che cosa è stato fatto (`action`: none, adopted, reforged); il chiamante salva.
+    """
+    if store.items and (dim != store.dim or store.model not in (None, model)):
+        return store.reforge(embed, model)
+    if store.model != model and model is not None:
+        store.model = model
+        return {"action": "adopted", "model": model}
+    return {"action": "none", "model": store.model}
 
 
 def decisions_from_answers(answers: dict) -> dict[str, str]:
@@ -185,8 +242,6 @@ def decisions_from_answers(answers: dict) -> dict[str, str]:
             summary[qid] = result["choice"]
         elif kind == "score":
             summary[qid] = f"level {round(result['score'])}"
-        elif kind == "rank":
-            summary[qid] = " > ".join(result["ranking"])
         elif kind == "number":
             summary[qid] = f"{result['value']:g}"
         elif kind == "open":
@@ -245,49 +300,39 @@ def memory_entry(score: float, item: "Memory") -> dict:
     return {"id": item.id, "similarity": round(float(score), 4), "decisions": item.decisions, "note": item.note}
 
 
-def needs_embedding(body: dict, questions, store) -> bool:
+def needs_embedding(body: dict, store) -> bool:
     """Serve il vettore dello stato per consultare la memoria?"""
     from .schema import memory_options
 
     if store is None or not len(store):
         return False
-    return memory_options(body)["recall"] > 0 or any(q.type == "recall" for q in questions)
+    return memory_options(body)["recall"] > 0
 
 
 def memory_context(body: dict, questions, store, embedding) -> dict:
-    """Tutto ciò che la memoria aggiunge a una decisione, dato il vettore dello stato.
+    """Ciò che la memoria aggiunge a una decisione, dato il vettore dello stato.
 
     - recalled: i ricordi da restituire (`memory.recall`);
-    - prompt: il testo dei ricordi da mettere nel prompt (`memory.inject`), oppure None;
-    - votes: il voto dei ricordi per ogni domanda che coprono (`memory.vote`);
-    - recall_answers: le risposte alle domande di tipo `recall`.
+    - votes: il voto dei ricordi per ogni domanda che coprono (`memory.vote`).
     """
     from .schema import memory_options
 
     options = memory_options(body)
-    context = {"recalled": [], "prompt": None, "votes": {}, "recall_answers": {}}
-    if store is None:
+    context = {"recalled": [], "votes": {}}
+    if store is None or options["recall"] == 0 or not len(store):
         return context
-    if options["recall"] > 0 and len(store):
-        found = store.search(embedding, max(options["recall"], VOTE_K), options["min_similarity"])
-        context["recalled"] = found[: options["recall"]]
-        if options["inject"]:
-            context["prompt"] = [item.render() for _, item in context["recalled"]] or None
-        if options["vote"]:
-            context["votes"] = memory_votes(questions, found[:VOTE_K])
-    for question in questions:
-        if question.type == "recall":
-            found = store.search(embedding, question.params["k"]) if len(store) else []
-            context["recall_answers"][question.id] = {"type": "recall", "memories": [memory_entry(s, i) for s, i in found]}
+    found = store.search(embedding, max(options["recall"], VOTE_K), options["min_similarity"])
+    context["recalled"] = found[: options["recall"]]
+    if options["vote"]:
+        context["votes"] = memory_votes(questions, found[:VOTE_K])
     return context
 
 
 def apply_memory_context(response: dict, context: dict, body: dict, questions) -> dict:
-    """Aggiunge a una risposta del modello i voti, le domande recall e i ricordi richiamati."""
+    """Aggiunge a una risposta del modello il voto dei ricordi e i ricordi richiamati."""
     from .schema import memory_options
 
     answers = response.setdefault("answers", {})
-    answers.update(context["recall_answers"])
     for qid, vote in context["votes"].items():
         if qid in answers:
             answers[qid]["memory"] = vote

@@ -5,13 +5,12 @@ Una richiesta ha uno `state` (stringa, oggetto o array JSON) e una mappa
 del tipo, `criteria`.
 
 Tipi di Jev: noul, choice, score. Estensioni Egeria (senza training):
-- rank: ordinamento completo delle opzioni;
 - number: stima numerica a intervalli (valore atteso + intervallo);
-- open: risposta di una parola dall'intero vocabolario;
-- recall: "cosa ti ricorda?", i ricordi più simili allo stato (richiede una memoria).
+- open: risposta di una parola dall'intero vocabolario.
 
-Altre estensioni: `min_confidence` per domanda o globale (profondità dinamica);
-`embed` a livello di richiesta (vettore semantico dello stato).
+Altre estensioni: `min_confidence` per domanda o globale (sotto la soglia la risposta è
+`uncertain`); `memory` a livello di richiesta (ricordi simili e voto dei ricordi);
+stati con immagini.
 """
 
 from __future__ import annotations
@@ -21,15 +20,14 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-QUESTION_TYPES = ("noul", "choice", "score", "rank", "number", "open", "recall")
+QUESTION_TYPES = ("noul", "choice", "score", "number", "open")
 # Readout usato per ogni tipo: temperature, ordinamenti e formula di confidenza.
-READOUT = {"noul": "noul", "choice": "choice", "rank": "choice", "score": "score", "number": "score",
-           "open": "open", "recall": "memory"}
+READOUT = {"noul": "noul", "choice": "choice", "score": "score", "number": "score", "open": "open"}
 # Il readout usa una lettera maiuscola per opzione, ognuna un singolo token.
 MAX_OPTIONS = 26
 MAX_SCORE_LEVELS = 10
 MAX_TOP_K = 20
-MAX_RECALL = 10
+MAX_RECALL = 10  # ricordi restituiti al massimo con memory.recall
 
 DEFAULT_NOUL_CRITERIA = {
     "true": "The statement holds for the state.",
@@ -54,9 +52,8 @@ class Question:
     instructions: str
     options: tuple[Option, ...]
     # Confidenza minima, sulla stessa scala del campo `confidence` della risposta
-    # (corretta per il caso: 0 = a caso, 1 = certezza). Con la profondità dinamica il
-    # modello esce al primo blocco che la raggiunge; se nemmeno l'ultimo layer ci
-    # arriva, la risposta è marcata come incerta.
+    # (corretta per il caso: 0 = a caso, 1 = certezza). Sotto la soglia la risposta
+    # è marcata come incerta (`status: uncertain`).
     min_confidence: float | None = None
     # Parametri specifici del tipo: number {edges, unit}; open {top_k}.
     params: dict = field(default_factory=dict, compare=False)
@@ -145,8 +142,6 @@ def parse_question(qid: str, body: Any, default_min_confidence: float | None = N
     if qtype not in QUESTION_TYPES:
         raise RequestError(f"domanda {qid!r}: type deve essere uno di {QUESTION_TYPES}")
     instructions = body.get("instructions")
-    if qtype == "recall" and instructions in (None, "", [], {}):
-        instructions = "What does this remind you of?"  # il recupero usa lo stato, non il testo della domanda
     if instructions in (None, "", [], {}):
         raise RequestError(f"domanda {qid!r}: instructions mancante")
     criteria = body.get("criteria")
@@ -162,9 +157,9 @@ def parse_question(qid: str, body: Any, default_min_confidence: float | None = N
                 if description:
                     merged[key] = description
         options = (Option("true", merged["true"]), Option("false", merged["false"]))
-    elif qtype in ("choice", "rank"):
+    elif qtype == "choice":
         if not isinstance(criteria, dict) or len(criteria) < 2:
-            raise RequestError(f"domanda {qid!r}: {qtype} richiede criteria con almeno 2 opzioni")
+            raise RequestError(f"domanda {qid!r}: choice richiede criteria con almeno 2 opzioni")
         if len(criteria) > MAX_OPTIONS:
             raise RequestError(f"domanda {qid!r}: al massimo {MAX_OPTIONS} opzioni (sono {len(criteria)})")
         options = tuple(
@@ -184,12 +179,6 @@ def parse_question(qid: str, body: Any, default_min_confidence: float | None = N
         options = tuple(
             Option(_interval_key(lo, hi), _interval_text(lo, hi, unit)) for lo, hi in zip(edges[:-1], edges[1:])
         )
-    elif qtype == "recall":
-        k = body.get("k", 3)
-        if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= MAX_RECALL:
-            raise RequestError(f"domanda {qid!r}: k deve essere un intero fra 1 e {MAX_RECALL}")
-        params = {"k": k}
-        options = ()
     else:  # open
         if criteria is not None:
             raise RequestError(f"domanda {qid!r}: open non ammette criteria")
@@ -206,28 +195,32 @@ def parse_question(qid: str, body: Any, default_min_confidence: float | None = N
     return Question(qid, qtype, render_value(instructions), options, threshold, params)
 
 
-def parse_request(body: Any, default_min_confidence: float | None = None) -> tuple[Any, list[Question]]:
-    """Valida un body `/v1/systemone` e restituisce (state, domande).
-
-    Soglia `min_confidence` di ogni domanda, dalla più specifica alla più generale:
-    1. `min_confidence` della domanda (`null` esplicito = profondità completa);
-    2. `min_confidence` globale della richiesta (`null` esplicito = profondità completa);
-    3. `default_min_confidence` del server;
-    4. nessuna soglia: default prudente, modello completo senza uscite anticipate.
-    """
-    if not isinstance(body, dict):
-        raise RequestError("il body deve essere un oggetto JSON")
-    state = body.get("state")
+def parse_state(state: Any) -> Any:
+    """Valida uno stato: stringa, oggetto o array JSON, oppure lista di parti testo/immagine."""
     if state in (None, "", [], {}):
         raise RequestError("state mancante")
     if not isinstance(state, (str, dict, list)):
         raise RequestError("state deve essere stringa, oggetto o array")
     if is_multimodal(state):
         validate_parts(state)
-    questions = body.get("questions", {})
-    analysis = state_analysis(body)
-    if not isinstance(questions, dict) or not (questions or any(analysis.values())):
-        raise RequestError("questions deve essere una mappa non vuota id -> domanda (o chiedere embed)")
+    return state
+
+
+def parse_request(body: Any, default_min_confidence: float | None = None) -> tuple[Any, list[Question]]:
+    """Valida un body `/v1/systemone` e restituisce (state, domande).
+
+    Soglia `min_confidence` di ogni domanda, dalla più specifica alla più generale:
+    1. `min_confidence` della domanda (`null` esplicito = nessuna soglia);
+    2. `min_confidence` globale della richiesta (`null` esplicito = nessuna soglia);
+    3. `default_min_confidence` del server;
+    4. nessuna soglia: la risposta non riporta `status`.
+    """
+    if not isinstance(body, dict):
+        raise RequestError("il body deve essere un oggetto JSON")
+    state = parse_state(body.get("state"))
+    questions = body.get("questions")
+    if not isinstance(questions, dict) or not questions:
+        raise RequestError("questions deve essere una mappa non vuota id -> domanda")
     if "min_confidence" in body:
         default = _min_confidence(body["min_confidence"], "richiesta")
     else:
@@ -262,24 +255,12 @@ def image_max_side(body: dict) -> int | None:
     return value
 
 
-def state_analysis(body: dict) -> dict[str, bool]:
-    """Opzioni di analisi dello stato a livello di richiesta: `embed`."""
-    result = {}
-    for key in ("embed",):
-        value = body.get(key, False)
-        if not isinstance(value, bool):
-            raise RequestError(f"{key} deve essere true o false")
-        result[key] = value
-    return result
-
-
-
 def memory_options(body: dict) -> dict:
-    """`"memory": {"recall": k, "min_similarity": x, "vote": true, "inject": false}`.
+    """`"memory": {"recall": k, "min_similarity": x, "vote": true}`.
 
-    - recall: quanti ricordi restituire in output;
-    - vote: voto dei ricordi per le domande che coprono (sui 10 più simili);
-    - inject: mettere i ricordi nel prompt. Spento di default: zero-shot non migliora le decisioni.
+    - recall: quanti ricordi restituire in output (0 = memoria non consultata);
+    - min_similarity: similarità minima dei ricordi restituiti;
+    - vote: voto dei ricordi per le domande che coprono (sui 10 più simili).
     """
     options = body.get("memory", {})
     if options is None:
@@ -293,27 +274,8 @@ def memory_options(body: dict) -> dict:
     if threshold is not None and (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
                                   or not -1.0 <= threshold <= 1.0):
         raise RequestError("memory.min_similarity deve essere un numero fra -1 e 1")
-    flags = {}
-    for key, default in (("vote", True), ("inject", False)):
-        value = options.get(key, default)
-        if not isinstance(value, bool):
-            raise RequestError(f"memory.{key} deve essere true o false")
-        flags[key] = value
-    return {"recall": recall, "min_similarity": threshold, **flags}
+    vote = options.get("vote", True)
+    if not isinstance(vote, bool):
+        raise RequestError("memory.vote deve essere true o false")
+    return {"recall": recall, "min_similarity": threshold, "vote": vote}
 
-
-MAX_PROMPT_MEMORIES = 10
-MAX_MEMORY_CHARS = 4000
-
-
-def prompt_memories(body: dict) -> list[str] | None:
-    """`"memories": ["...", ...]`: ricordi già in forma di testo da mettere nel prompt.
-
-    Li usa il server web quando la memoria sta da lui e il modello è un servizio separato.
-    """
-    value = body.get("memories")
-    if value is None:
-        return None
-    if not isinstance(value, list) or len(value) > MAX_PROMPT_MEMORIES or not all(isinstance(v, str) for v in value):
-        raise RequestError(f"memories deve essere una lista di al massimo {MAX_PROMPT_MEMORIES} testi")
-    return [v[:MAX_MEMORY_CHARS] for v in value] or None

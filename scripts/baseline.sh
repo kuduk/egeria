@@ -24,11 +24,11 @@ for model in "$@"; do
   echo "=== $model -> $dir"
   # Il file .meta.json viene scritto solo a predizione completata: se esiste, il passo si salta.
   [ -f "$dir/train.meta.json" ] || $EGERIA predict --model "$model" $EXTRA --permutations "$PERMUTATIONS" \
-    --exits blocks --split train --limit "$CAL_CASES" --out "$dir/train.jsonl"
+    --split train --limit "$CAL_CASES" --out "$dir/train.jsonl"
   [ -f "$dir/test.meta.json" ] || $EGERIA predict --model "$model" $EXTRA --permutations "$PERMUTATIONS" \
-    --exits blocks --split test --out "$dir/test.jsonl"
+    --split test --out "$dir/test.jsonl"
   $EGERIA calibrate --predictions "$dir/train.jsonl" --out "$dir/temperature.json"
-  $EGERIA evaluate --predictions "$dir/test.jsonl" --prior "$dir/train.jsonl" --depth --report "$dir/report-T1.json" | tee "$dir/report-T1.txt"
-  $EGERIA evaluate --predictions "$dir/test.jsonl" --temperatures "$dir/temperature.json" --prior "$dir/train.jsonl" --depth \
+  $EGERIA evaluate --predictions "$dir/test.jsonl" --prior "$dir/train.jsonl" --report "$dir/report-T1.json" | tee "$dir/report-T1.txt"
+  $EGERIA evaluate --predictions "$dir/test.jsonl" --temperatures "$dir/temperature.json" --prior "$dir/train.jsonl" \
     --report "$dir/report-cal.json" | tee "$dir/report-cal.txt"
 done

@@ -4,16 +4,17 @@ Il modello non genera token. Per ogni prompt si prende l'hidden state finale
 dell'ultima posizione e lo si moltiplica solo per le righe dell'lm_head delle
 lettere A..Z: la softmax è ristretta alle opzioni dichiarate (readout di SemIf).
 
-Readout intermedi (per lo studio della profondità dinamica): gli hidden state
-all'uscita dei layer richiesti passano per la norm finale e per le stesse righe
-dell'lm_head (logit lens). Di default si leggono i confini di blocco, cioè i
-layer full-attention che chiudono ogni gruppo di 3 Gated DeltaNet + 1 attention.
+Riuso dello stato: tutte le domande e le permutazioni su uno stesso stato iniziano con lo
+stesso prefisso (istruzioni + stato, immagini comprese). Il prefisso si calcola una volta con
+la cache; la cache ibrida (stato ricorrente e convoluzione dei layer DeltaNet, KV dei layer di
+attenzione) si duplica per le domande, e si passano in batch solo le code (domanda + opzioni).
 """
 
 from __future__ import annotations
 
+import copy
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -22,6 +23,17 @@ from .images import load_images
 from .prompt import LETTERS, build_messages, build_plain, orderings
 from .schema import Question, parse_request
 
+
+SHARE_MODES = ("auto", "always", "never")
+# Riuso dello stato in modalità auto: si condivide il prefisso se evita almeno questi token
+# (prefisso × righe in più). Misure con scripts/bench_riuso_stato.py (RTX 4070 Laptop, 2 permutazioni,
+# documentazione/08-riuso-dello-stato.md): su GPU il passaggio in più per il prefisso ha un costo fisso
+# (lanci di kernel) che si recupera solo evitando abbastanza token, con pareggio a ~500 token sul 2B e
+# ~1000 sul 0.8B, dove ogni token costa meno. Su CPU il calcolo domina e condividere conviene sempre.
+SHARE_THRESHOLD_GPU_SMALL = 1000  # modelli testuali sotto SMALL_MODEL_PARAMETERS
+SHARE_THRESHOLD_GPU = 500
+SHARE_THRESHOLD_CPU = 1
+SMALL_MODEL_PARAMETERS = 1.2e9
 
 _DISPATCH_INSTALLED = False
 _KERNEL_FUNCTIONS = (
@@ -72,8 +84,6 @@ class QuestionScore:
     option_logits: np.ndarray  # log-prob medie sulle permutazioni, nell'ordine originale delle opzioni
     order_argmax: list[int]  # argmax (indice originale) per ogni permutazione
     input_tokens: int
-    exit_logits: np.ndarray | None = None  # [n_exit, n_opzioni], stessa combinazione
-    exit_layers: list[int] = field(default_factory=list)
 
 
 class DecisionScorer:
@@ -90,6 +100,7 @@ class DecisionScorer:
         revision: str | None = None,
         vision: bool = False,
         image_batch: int = 6,
+        share_state: str = "auto",
     ):
         import torch
         import transformers
@@ -97,6 +108,9 @@ class DecisionScorer:
         install_device_dispatch()
         if prompt_style not in {"chat", "plain"}:
             raise ValueError("prompt_style deve essere chat o plain")
+        if share_state not in SHARE_MODES:
+            raise ValueError(f"share_state deve essere uno di {SHARE_MODES}")
+        self.share_state = share_state
         self.torch = torch
         self.model_id = model_id
         self.prompt_style = prompt_style
@@ -136,12 +150,10 @@ class DecisionScorer:
             self.processor.tokenizer.padding_side = "left"  # l'ultima posizione è sempre l'ultimo token reale
             self.multimodal = self.model.model
             self.body = self.model.model.language_model
-            config = config.get_text_config()
         else:
             self.body = self.model.model
-        self.layer_types = list(getattr(config, "layer_types", []) or [])
-        self.num_layers = len(self.body.layers)
-        self.block_exits = [i for i, kind in enumerate(self.layer_types) if kind == "full_attention"]
+        self.body_parameters = sum(p.numel() for p in self.body.parameters())
+        self.embedding_dim = int(self.body.config.hidden_size)  # dimensione dei vettori di analyze_state
         self.pad_id = self.tokenizer.pad_token_id
         if self.pad_id is None:
             self.pad_id = self.tokenizer.eos_token_id
@@ -159,11 +171,11 @@ class DecisionScorer:
 
     # ------------------------------------------------------------------ prompt
 
-    def _prompt_text(self, state, question: Question, order: list[int], memories: list[str] | None = None) -> str:
+    def _prompt_text(self, state, question: Question, order: list[int]) -> str:
         if self.prompt_style == "plain":
-            return build_plain(state, question, order, memories)
+            return build_plain(state, question, order)
         return self.tokenizer.apply_chat_template(
-            build_messages(state, question, order, memories),
+            build_messages(state, question, order),
             tokenize=False, add_generation_prompt=True, enable_thinking=False,
         )
 
@@ -177,35 +189,106 @@ class DecisionScorer:
             if self.tokenizer.encode(text + prefix + letter, add_special_tokens=False) != ids + [slot]:
                 raise ValueError(f"la tokenizzazione cambia al confine della risposta per lo slot {letter}")
 
-    def encode(self, state, question: Question, order: list[int], memories: list[str] | None = None) -> list[int]:
-        ids = self.tokenizer.encode(self._prompt_text(state, question, order, memories), add_special_tokens=False)
+    def encode(self, state, question: Question, order: list[int]) -> list[int]:
+        ids = self.tokenizer.encode(self._prompt_text(state, question, order), add_special_tokens=False)
         if len(ids) > self.max_tokens:
             raise ValueError(f"domanda {question.id!r}: {len(ids)} token superano il limite {self.max_tokens}")
         return ids
 
     # ----------------------------------------------------------------- forward
 
-    def slot_logits(self, sequences: list[list[int]], n_options: list[int], exit_layers: list[int] | None = None):
-        """Logit degli slot per ogni sequenza: finali [n] ed eventualmente intermedi [n_exit, n]."""
+    def slot_logits(self, sequences: list[list[int]], n_options: list[int]) -> list[np.ndarray]:
+        """Logit degli slot (lettere) all'ultima posizione di ogni sequenza.
+
+        Se conviene, il prefisso comune a tutte le sequenze si calcola una volta sola (riuso dello stato).
+        """
+        prefix = self._shared_prefix(sequences)
+        if prefix:
+            with self.torch.inference_mode():
+                cache = self.body(input_ids=self.torch.tensor([sequences[0][:prefix]], device=self.device),
+                                  use_cache=True).past_key_values
+            return self._suffix_logits(self.body, cache, prefix, [seq[prefix:] for seq in sequences], n_options)
+        return self._full_logits(sequences, n_options)
+
+    def _shared_prefix(self, sequences: list[list[int]]) -> int:
+        """Token iniziali comuni a tutte le sequenze, se conviene calcolarli una volta sola; altrimenti 0."""
+        if self.share_state == "never" or len(sequences) < 2:
+            return 0
+        first, limit = sequences[0], min(map(len, sequences)) - 1  # a ogni sequenza resta almeno un token di coda
+        prefix = 0
+        while prefix < limit and all(seq[prefix] == first[prefix] for seq in sequences):
+            prefix += 1
+        return prefix if self._worth_sharing(prefix, len(sequences)) else 0
+
+    def _worth_sharing(self, prefix: int, rows: int) -> bool:
+        """Il prefisso condiviso costa un passaggio in più: conviene solo se evita abbastanza token."""
+        if self.share_state == "always":
+            return prefix > 0
+        return self.share_state == "auto" and prefix * (rows - 1) >= self.share_threshold()
+
+    def share_threshold(self) -> int:
+        """Token evitati a partire dai quali, in modalità auto, conviene condividere il prefisso."""
+        if self.device.type != "cuda":
+            return SHARE_THRESHOLD_CPU
+        return SHARE_THRESHOLD_GPU_SMALL if self.body_parameters < SMALL_MODEL_PARAMETERS else SHARE_THRESHOLD_GPU
+
+    def _suffix_logits(self, model, cache, prefix: int, suffixes: list[list[int]], n_options: list[int],
+                       rope_delta=None) -> list[np.ndarray]:
+        """Logit degli slot per le code, tutte a partire dallo stesso prefisso già in `cache`.
+
+        Per ogni batch la cache del prefisso si copia e si duplica sulle righe. Right padding: con un
+        modello causale le posizioni dopo l'ultimo token reale non cambiano quelle lette.
+        Con le immagini le posizioni M-RoPE delle code sono indice + `rope_delta`.
+        """
+        torch = self.torch
+        order = sorted(range(len(suffixes)), key=lambda i: len(suffixes[i]))
+        finals: list[np.ndarray | None] = [None] * len(suffixes)
+        start = 0
+        while start < len(order):
+            end = start + 1
+            while end < len(order) and (end - start + 1) * len(suffixes[order[end]]) <= self.batch_tokens:
+                end += 1
+            batch = order[start:end]
+            rows, width = len(batch), max(len(suffixes[i]) for i in batch)
+            ids = torch.full((rows, width), self.pad_id, dtype=torch.long, device=self.device)
+            mask = torch.zeros((rows, prefix + width), dtype=torch.long, device=self.device)
+            mask[:, :prefix] = 1
+            for row, index in enumerate(batch):
+                ids[row, : len(suffixes[index])] = torch.tensor(suffixes[index], device=self.device)
+                mask[row, prefix : prefix + len(suffixes[index])] = 1
+            kwargs = {}
+            if rope_delta is not None:
+                positions = torch.arange(prefix, prefix + width, device=self.device) + rope_delta
+                kwargs["position_ids"] = positions.view(1, 1, -1).expand(3, rows, -1)
+            with torch.inference_mode():
+                branch = copy.deepcopy(cache) if end < len(order) else cache  # l'ultimo batch usa l'originale
+                branch.reorder_cache(torch.zeros(rows, dtype=torch.long, device=self.device))
+                out = model(input_ids=ids, attention_mask=mask, past_key_values=branch, use_cache=True, **kwargs)
+                last = torch.tensor([len(suffixes[i]) - 1 for i in batch], device=self.device)
+                hidden = out.last_hidden_state[torch.arange(rows, device=self.device), last].float()
+                logits = (hidden @ self.slot_weight.T).cpu().numpy()
+            for row, index in enumerate(batch):
+                finals[index] = logits[row, : n_options[index]]
+            start = end
+        return finals
+
+    def _full_logits(self, sequences: list[list[int]], n_options: list[int]) -> list[np.ndarray]:
+        """Ogni sequenza per intero, a batch per lunghezza."""
         order = sorted(range(len(sequences)), key=lambda i: len(sequences[i]))
         finals: list[np.ndarray | None] = [None] * len(sequences)
-        exits: list[np.ndarray | None] = [None] * len(sequences)
         start = 0
         while start < len(order):
             end = start + 1
             while end < len(order) and (end - start + 1) * len(sequences[order[end]]) <= self.batch_tokens:
                 end += 1
             batch = order[start:end]
-            final, inter = self._forward_batch([sequences[i] for i in batch], exit_layers)
+            final = self._forward_batch([sequences[i] for i in batch])
             for row, index in enumerate(batch):
-                n = n_options[index]
-                finals[index] = final[row, :n]
-                if inter is not None:
-                    exits[index] = inter[:, row, :n]
+                finals[index] = final[row, : n_options[index]]
             start = end
-        return finals, (exits if exit_layers else None)
+        return finals
 
-    def _forward_batch(self, sequences: list[list[int]], exit_layers: list[int] | None):
+    def _forward_batch(self, sequences: list[list[int]]) -> np.ndarray:
         torch = self.torch
         width = max(map(len, sequences))
         ids = torch.full((len(sequences), width), self.pad_id, dtype=torch.long)
@@ -215,187 +298,33 @@ class DecisionScorer:
             mask[row, : len(seq)] = 1
         last = torch.tensor([len(seq) - 1 for seq in sequences], device=self.device)
         rows = torch.arange(len(sequences), device=self.device)
-
-        captured: dict[int, object] = {}
-        handles = []
-        for layer in exit_layers or []:
-            def hook(_module, _inputs, output, layer=layer):
-                hidden = output[0] if isinstance(output, tuple) else output
-                captured[layer] = hidden[rows, last]
-            handles.append(self.body.layers[layer].register_forward_hook(hook))
-        try:
-            with torch.inference_mode():
-                out = self.body(
-                    input_ids=ids.to(self.device), attention_mask=mask.to(self.device), use_cache=False, return_dict=True
-                )
-                hidden = out.last_hidden_state[rows, last].float()
-                final = (hidden @ self.slot_weight.T).cpu().numpy()
-                inter = None
-                if exit_layers:
-                    stacked = torch.stack([self.body.norm(captured[layer]).float() for layer in exit_layers])
-                    inter = (stacked @ self.slot_weight.T).cpu().numpy()
-        finally:
-            for handle in handles:
-                handle.remove()
-        return final, inter
-
-    # ------------------------------------------------------ profondità dinamica
-
-    def _prepare(self, hidden, mask):
-        """Maschere e rotary per il batch corrente, come nel forward di Qwen3_5TextModel."""
-        from transformers.masking_utils import create_causal_mask, create_recurrent_attention_mask
-
-        torch = self.torch
-        batch, width = mask.shape
-        positions = torch.arange(width, device=self.device).view(1, 1, -1).expand(4, batch, -1)
-        text_positions = positions[0]
-        kwargs = {
-            "config": self.body.config,
-            "inputs_embeds": hidden,
-            "attention_mask": mask,
-            "past_key_values": None,
-            "position_ids": text_positions,
-        }
-        masks = {
-            "full_attention": create_causal_mask(**kwargs),
-            "linear_attention": create_recurrent_attention_mask(**kwargs),
-        }
-        return masks, self.body.rotary_emb(hidden, positions[1:]), text_positions
-
-    def _adaptive_batch(self, items: list[dict], temperatures: dict, exit_layers: list[int]) -> dict[int, tuple]:
-        """Esegue il modello blocco per blocco e toglie dal batch le domande già decise.
-
-        `items`: per domanda, le sequenze (una per permutazione), gli ordini, il tipo,
-        il numero di opzioni e la soglia. Tutte le permutazioni di una domanda escono
-        insieme, sulla distribuzione combinata e calibrata per quel layer.
-        Restituisce {indice domanda: (log-prob combinate, layer d'uscita)}.
-        """
-        from .confidence import decision_confidence, softmax
-
-        torch = self.torch
-        rows = [(qi, k) for qi, item in enumerate(items) for k in range(len(item["sequences"]))]
-        sequences = [items[qi]["sequences"][k] for qi, k in rows]
-        width = max(map(len, sequences))
-        ids = torch.full((len(rows), width), self.pad_id, dtype=torch.long, device=self.device)
-        mask = torch.zeros((len(rows), width), dtype=torch.long, device=self.device)
-        for r, seq in enumerate(sequences):
-            ids[r, : len(seq)] = torch.tensor(seq, device=self.device)
-            mask[r, : len(seq)] = 1
-        lengths = torch.tensor([len(seq) for seq in sequences], device=self.device)
-        calibrated_layers = temperatures.get("layers", exit_layers)
-        last = self.num_layers - 1
-        early = {layer for layer in exit_layers if layer != last}
-
-        active = list(range(len(rows)))  # righe originali ancora nel batch
-        done: dict[int, tuple] = {}
         with torch.inference_mode():
-            hidden = self.body.embed_tokens(ids)
-            masks, rope, positions = self._prepare(hidden, mask)
-            for i, layer in enumerate(self.body.layers):
-                hidden = layer(
-                    hidden, position_embeddings=rope, attention_mask=masks[self.layer_types[i]], position_ids=positions
-                )
-                if i not in early and i != last:
-                    continue
-                current = lengths[active]
-                picked = hidden[torch.arange(len(active), device=self.device), current - 1]
-                slots = (self.body.norm(picked).float() @ self.slot_weight.T).cpu().numpy()
-                parts: dict[int, list[tuple[int, int]]] = {}
-                for position, r in enumerate(active):
-                    parts.setdefault(rows[r][0], []).append((position, rows[r][1]))
-                finished = set()
-                for qi, members in parts.items():
-                    item = items[qi]
-                    combined = np.zeros(item["n"])
-                    for position, k in members:
-                        back = np.empty(item["n"])
-                        back[item["orders"][k]] = log_softmax(slots[position, : item["n"]])
-                        combined += back / len(members)
-                    if i == last:
-                        done[qi] = (combined, i)
-                        continue
-                    if item["threshold"] is None or i not in calibrated_layers or item["readout"] not in temperatures:
-                        continue
-                    t = temperatures[item["readout"]][calibrated_layers.index(i)]
-                    if decision_confidence(item["type"], softmax(combined, t)) >= item["threshold"]:
-                        done[qi] = (combined, i)
-                        finished.add(qi)
-                if i == last:
-                    break
-                if finished:
-                    keep = [position for position, r in enumerate(active) if rows[r][0] not in finished]
-                    active = [active[position] for position in keep]
-                    if not active:
-                        break
-                    # Right padding + modello causale: si possono tagliare le colonne oltre la sequenza più lunga.
-                    width = int(lengths[active].max())
-                    index = torch.tensor(keep, device=self.device)
-                    hidden = hidden[index, :width]
-                    mask = mask[index, :width]
-                    masks, rope, positions = self._prepare(hidden, mask)
-        return done
-
-    def score_adaptive(self, state, questions: list[Question], permutations: int, temperatures: dict,
-                       exit_layers: list[int], memories: list[str] | None = None) -> list[tuple[QuestionScore, int]]:
-        """Come `score`, ma ogni domanda esce al primo layer che raggiunge la sua min_confidence."""
-        items = []
-        for question in questions:
-            orders = orderings(question, permutations)
-            items.append({
-                "question": question, "orders": orders, "type": question.type, "readout": question.readout,
-                "n": len(question.options),
-                "threshold": question.min_confidence,
-                "sequences": [self.encode(state, question, order, memories) for order in orders],
-            })
-        # Batch di domande intere (le permutazioni di una domanda escono insieme), per lunghezza.
-        order = sorted(range(len(items)), key=lambda qi: max(map(len, items[qi]["sequences"])))
-        results: dict[int, tuple] = {}
-        start = 0
-        while start < len(order):
-            end, rows, width = start, 0, 0
-            while end < len(order):
-                item = items[order[end]]
-                new_rows = rows + len(item["sequences"])
-                new_width = max(width, max(map(len, item["sequences"])))
-                if end > start and new_rows * new_width > self.batch_tokens:
-                    break
-                rows, width, end = new_rows, new_width, end + 1
-            batch = [items[qi] for qi in order[start:end]]
-            for local, (logits, layer) in self._adaptive_batch(batch, temperatures, exit_layers).items():
-                results[order[start + local]] = (logits, layer)
-            start = end
-        output = []
-        for qi, item in enumerate(items):
-            logits, layer = results[qi]
-            score = QuestionScore(
-                question=item["question"], option_logits=logits, order_argmax=[],
-                input_tokens=sum(map(len, item["sequences"])),
+            out = self.body(
+                input_ids=ids.to(self.device), attention_mask=mask.to(self.device), use_cache=False, return_dict=True
             )
-            output.append((score, layer))
-        return output
+            hidden = out.last_hidden_state[rows, last].float()
+            return (hidden @ self.slot_weight.T).cpu().numpy()
 
     # --------------------------------------------------------------- decisioni
 
-    def score(self, state, questions: list[Question], permutations: int = 1, exit_layers: list[int] | None = None,
-              memories: list[str] | None = None):
+    def score(self, state, questions: list[Question], permutations: int = 1) -> list[QuestionScore]:
         """Punteggi per tutte le domande su uno stato, combinando le permutazioni delle opzioni."""
         plan, sequences, n_options = [], [], []
         for qi, question in enumerate(questions):
             for order in orderings(question, permutations):
                 plan.append((qi, order))
-                sequences.append(self.encode(state, question, order, memories))
+                sequences.append(self.encode(state, question, order))
                 n_options.append(len(order))
-        finals, exits = self.slot_logits(sequences, n_options, exit_layers)
-        return self._combine(questions, plan, [len(seq) for seq in sequences], finals, exits, exit_layers)
+        finals = self.slot_logits(sequences, n_options)
+        return self._combine(questions, plan, [len(seq) for seq in sequences], finals)
 
-    def _combine(self, questions, plan, lengths, finals, exits, exit_layers):
+    def _combine(self, questions, plan, lengths, finals) -> list[QuestionScore]:
         """Media delle log-probabilità sulle permutazioni, riportate all'ordine originale delle opzioni."""
         results = []
         for qi, question in enumerate(questions):
             n = len(question.options)
             parts = [k for k, (q, _) in enumerate(plan) if q == qi]
             combined = np.zeros(n)
-            combined_exit = np.zeros((len(exit_layers), n)) if exit_layers else None
             argmaxes = []
             for k in parts:
                 order = plan[k][1]
@@ -404,32 +333,35 @@ class DecisionScorer:
                 back[order] = lp  # slot s -> opzione originale order[s]
                 combined += back / len(parts)
                 argmaxes.append(int(order[int(np.argmax(lp))]))
-                if exit_layers:
-                    for e in range(len(exit_layers)):
-                        lpe = log_softmax(exits[k][e])
-                        backe = np.empty(n)
-                        backe[order] = lpe
-                        combined_exit[e] += backe / len(parts)
-            results.append(
-                QuestionScore(
-                    question=question,
-                    option_logits=combined,
-                    order_argmax=argmaxes,
-                    input_tokens=sum(lengths[k] for k in parts),
-                    exit_logits=combined_exit,
-                    exit_layers=list(exit_layers or []),
-                )
-            )
+            results.append(QuestionScore(question=question, option_logits=combined, order_argmax=argmaxes,
+                                         input_tokens=sum(lengths[k] for k in parts)))
         return results
 
     def score_images(self, state, questions: list[Question], permutations: int, images: list):
-        """Readout a lettere con immagini nello stato: processore di Qwen3.5 + modello multimodale."""
+        """Readout a lettere con immagini nello stato: processore di Qwen3.5 + modello multimodale.
+
+        Se conviene, istruzioni e stato (immagini comprese) si calcolano una volta sola e si
+        passano in batch solo le code; altrimenti ogni prompt porta la sua copia delle immagini.
+        """
         torch = self.torch
         plan, texts = [], []
         for qi, question in enumerate(questions):
             for order in orderings(question, permutations):
                 plan.append((qi, order))
                 texts.append(self._prompt_text(state, question, order))
+        cut = self._state_boundary(texts)
+        if cut is not None:
+            self.multimodal.rope_deltas = None  # niente spostamenti M-RoPE rimasti da una richiesta precedente
+            prefix_inputs = self.processor(text=[texts[0][:cut]], images=images, return_tensors="pt").to(self.device)
+            prefix = int(prefix_inputs["input_ids"].shape[1])
+            suffixes = [self.tokenizer.encode(text[cut:], add_special_tokens=False) for text in texts]
+            if self._worth_sharing(prefix, len(texts)):
+                with torch.inference_mode():
+                    cache = self.multimodal(**prefix_inputs, use_cache=True).past_key_values
+                delta = self.multimodal.rope_deltas.reshape(-1)[0]
+                finals = self._suffix_logits(self.multimodal, cache, prefix, suffixes,
+                                             [len(order) for _, order in plan], rope_delta=delta)
+                return self._combine(questions, plan, [prefix + len(s) for s in suffixes], finals)
         finals, lengths = [], []
         for start in range(0, len(texts), self.image_batch):
             chunk = texts[start : start + self.image_batch]
@@ -441,68 +373,71 @@ class DecisionScorer:
             logits = (hidden @ self.slot_weight.T).cpu().numpy()
             finals += list(logits)
             lengths += inputs["attention_mask"].sum(1).tolist()
-        return self._combine(questions, plan, lengths, finals, None, None)
+        return self._combine(questions, plan, lengths, finals)
 
-    def default_exit_layers(self) -> list[int]:
-        """Confini di blocco da circa metà profondità in su: prima la risposta non è ancora formata (F0 §6.2)."""
-        return [layer for layer in self.block_exits if layer >= int(0.45 * self.num_layers)] or [self.num_layers - 1]
+    def _state_boundary(self, texts: list[str]) -> int | None:
+        """Posizione, uguale in tutti i prompt, subito dopo il blocco dello stato; None se non si può tagliare lì.
+
+        Il taglio non deve cambiare la tokenizzazione: si verifica su ogni prompt.
+        """
+        if self.share_state == "never" or len(texts) < 2:
+            return None
+        marker = "</state>\n\n"
+        cut = texts[0].find(marker)
+        if cut < 0:
+            return None
+        cut += len(marker)
+        encode = lambda text: self.tokenizer.encode(text, add_special_tokens=False)  # noqa: E731
+        head = encode(texts[0][:cut])
+        for text in texts:
+            if text[:cut] != texts[0][:cut] or encode(text) != head + encode(text[cut:]):
+                return None
+        return cut
 
     def decide(
         self,
         body: dict,
         permutations: int = 1,
         temperatures: dict[str, float] | None = None,
-        exit_temperatures: dict | None = None,
-        exit_layers: list[int] | None = None,
         default_min_confidence: float | None = None,
         memory=None,
     ) -> dict:
         """Risposta nel formato dell'API Jev per un body `/v1/systemone`.
 
-        Se almeno una domanda ha `min_confidence` e ci sono le temperature per layer,
-        si usa la profondità dinamica: ogni risposta riporta `depth` (layer usati) e
-        `status` (`decided`, oppure `uncertain` se nemmeno l'ultimo layer raggiunge la soglia).
-        Le domande `open` leggono tutto il vocabolario;
-        `embed` analizza lo stato in un passaggio a parte.
-        Con una `memory` (MemoryStore) e `"memory": {"recall": k}` nella richiesta, la risposta
-        riporta i k ricordi più simili e, per le domande che coprono, il voto dei ricordi
-        (`answers[q]["memory"]`). Con `"inject": true` i ricordi entrano anche nel prompt.
+        Ogni domanda con una soglia (`min_confidence`) riporta `status`: `decided`, oppure
+        `uncertain` se la confidenza resta sotto la soglia. Le domande `open` leggono tutto il
+        vocabolario. Con una `memory` (MemoryStore) e `"memory": {"recall": k}` nella richiesta,
+        la risposta riporta i k ricordi più simili e, per le domande che coprono, il voto dei
+        ricordi (`answers[q]["memory"]`).
         """
         from .confidence import answer, decision_confidence, softmax
         from .memory import apply_memory_context, memory_context, needs_embedding
-        from .schema import RequestError, image_max_side, is_multimodal, prompt_memories, state_analysis
+        from .schema import RequestError, image_max_side, is_multimodal
 
         state, questions = parse_request(body, default_min_confidence)
-        analysis = state_analysis(body)
-        if is_multimodal(state):
-            if self.processor is None:
-                raise RequestError("lo stato contiene immagini: serve il modello con la parte visiva (--vision)")
-        recalls = [q for q in questions if q.type == "recall"]
-        if recalls and memory is None:
-            raise RequestError("le domande recall richiedono una memoria (--memory)")
+        multimodal = is_multimodal(state)
+        if multimodal and self.processor is None:
+            raise RequestError("lo stato contiene immagini: serve il modello con la parte visiva (--vision)")
         started = time.perf_counter()
         temperatures = temperatures or {}
+        images = load_images(state, image_max_side(body)) if multimodal else None
 
-        # Vettore dello stato: per `embed` e per consultare la memoria.
-        state_result, analysis_tokens = None, 0
-        images = load_images(state, image_max_side(body)) if is_multimodal(state) else None
-        if analysis["embed"] or needs_embedding(body, questions, memory):
-            state_result, analysis_tokens = self.analyze_state(state, images=images)
-        context = memory_context(body, questions, memory, state_result["embedding"] if state_result else None)
-        # Ricordi nel prompt: dalla memoria locale, oppure già in testo dalla richiesta (server web).
-        memories = context["prompt"] or prompt_memories(body)
+        # Vettore dello stato, solo per consultare la memoria.
+        embedding, analysis_tokens = None, 0
+        if needs_embedding(body, memory):
+            result, analysis_tokens = self.analyze_state(state, images=images)
+            embedding = result["embedding"]
+        context = memory_context(body, questions, memory, embedding)
 
-        # Domande con readout a lettere, domande aperte (vocabolario intero) e recall (memoria).
-        lettered = [q for q in questions if q.type not in ("open", "recall")]
+        # Domande con readout a lettere e domande aperte (vocabolario intero).
+        lettered = [q for q in questions if q.type != "open"]
         opens = [q for q in questions if q.type == "open"]
-
-        multimodal = is_multimodal(state)
-        # Con le immagini niente uscita anticipata (posizioni M-RoPE): modello completo, ma status calcolato.
-        adaptive = not multimodal and bool(exit_temperatures) and any(q.min_confidence is not None for q in lettered)
-        results: dict[str, dict] = {}
-        input_tokens = 0
-        if lettered and multimodal:
-            for s in self.score_images(state, lettered, permutations, images):
+        answers: dict[str, dict] = {}
+        input_tokens = analysis_tokens
+        if lettered:
+            scores = self.score_images(state, lettered, permutations, images) if multimodal \
+                else self.score(state, lettered, permutations)
+            for s in scores:
                 q = s.question
                 p = softmax(s.option_logits, temperatures.get(q.readout, 1.0))
                 result = answer(q, p)
@@ -510,57 +445,23 @@ class DecisionScorer:
                     result["min_confidence"] = q.min_confidence
                     decided = decision_confidence(q.type, p) >= q.min_confidence
                     result["status"] = "decided" if decided else "uncertain"
-                results[q.id] = result
-                input_tokens += s.input_tokens
-        elif lettered and adaptive:
-            layers = exit_layers or self.default_exit_layers()
-            calibrated = exit_temperatures.get("layers", self.block_exits)
-            for s, layer in self.score_adaptive(state, lettered, permutations, exit_temperatures, layers, memories):
-                q = s.question
-                t = exit_temperatures[q.readout][calibrated.index(layer)] if q.readout in exit_temperatures else 1.0
-                p = softmax(s.option_logits, t)
-                result = answer(q, p)
-                result["depth"] = layer + 1
-                if q.min_confidence is not None:
-                    result["min_confidence"] = q.min_confidence
-                    decided = decision_confidence(q.type, p) >= q.min_confidence
-                    result["status"] = "decided" if decided else "uncertain"
-                results[q.id] = result
-                input_tokens += s.input_tokens
-        elif lettered:
-            for s in self.score(state, lettered, permutations, memories=memories):
-                q = s.question
-                p = softmax(s.option_logits, temperatures.get(q.readout, 1.0))
-                result = answer(q, p)
-                if q.min_confidence is not None:
-                    result["min_confidence"] = q.min_confidence
-                    decided = decision_confidence(q.type, p) >= q.min_confidence
-                    result["status"] = "decided" if decided else "uncertain"
-                results[q.id] = result
-                input_tokens += s.input_tokens
-
-        answers: dict[str, dict] = dict(results)
-        if opens:
-            for q, result, tokens in self.open_answers(state, opens, memories, images):
                 answers[q.id] = result
-                input_tokens += tokens
+                input_tokens += s.input_tokens
+        for q, result, tokens in self.open_answers(state, opens, images):
+            answers[q.id] = result
+            input_tokens += tokens
         response = {
             "model": self.model_id,
             "answers": answers,
             "usage": {"input_tokens": input_tokens, "output_tokens": 0},
         }
-        if analysis["embed"]:
-            response["state"] = state_result
-        response["usage"]["input_tokens"] += analysis_tokens
         apply_memory_context(response, context, body, questions)
         response["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
-        if adaptive:
-            response["layers"] = self.num_layers
         return response
 
     # ------------------------------------------------------------------ open
 
-    def open_answers(self, state, questions: list[Question], memories: list[str] | None = None, images=None):
+    def open_answers(self, state, questions: list[Question], images=None):
         """Risposta breve (una parola o un valore) dall'intero vocabolario, anche con immagini nello stato.
 
         Per ogni domanda: un prefill del prompt (con le immagini, se ci sono) che dà insieme i
@@ -576,7 +477,7 @@ class DecisionScorer:
         results = []
         for q in questions:
             text = self.tokenizer.apply_chat_template(
-                build_open_messages(state, q, memories), tokenize=False, add_generation_prompt=True, enable_thinking=False
+                build_open_messages(state, q), tokenize=False, add_generation_prompt=True, enable_thinking=False
             )
             if is_multimodal(state):
                 inputs = self.processor(text=[text], images=images, return_tensors="pt").to(self.device)
@@ -638,9 +539,9 @@ class DecisionScorer:
             self._special_cache = self.torch.tensor(sorted(ids), device=self.device)
         return self._special_cache
 
-    # ------------------------------------------------------------------ embed
+    # ------------------------------------------------------- vettore dello stato
 
-    def analyze_state(self, state, embed: bool = True, image_max_side: int | None = None, images=None) -> tuple[dict, int]:
+    def analyze_state(self, state, image_max_side: int | None = None, images=None) -> tuple[dict, int]:
         """Un passaggio sul solo stato: embedding = media degli hidden finali sui token dello stato, normalizzata L2.
 
         Con immagini nello stato si usa il modello multimodale e la media include i token visivi.
@@ -676,11 +577,8 @@ class DecisionScorer:
         while common > 0 and enc[-common:] != ids[-common:]:
             common -= 1
         end = len(ids) - common
-        result: dict = {}
-        if embed:
-            vector = hidden[start:end].float().mean(0)
-            vector = vector / vector.norm()
-            result["embedding"] = [round(v, 6) for v in vector.cpu().tolist()]
-            result["embedding_dim"] = len(result["embedding"])
-        return result, len(ids)
+        vector = hidden[start:end].float().mean(0)
+        vector = vector / vector.norm()
+        embedding = [round(v, 6) for v in vector.cpu().tolist()]
+        return {"embedding": embedding, "embedding_dim": len(embedding)}, len(ids)
 

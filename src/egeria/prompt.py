@@ -35,7 +35,6 @@ OPEN_SYSTEM_PROMPT = (
 TYPE_HINTS = {
     "noul": "Decide whether the statement or question below holds for the state.",
     "choice": "Choose the single option that best answers the question for the state.",
-    "rank": "Choose the single option that best answers the question for the state.",
     "score": "Place the state on the ordered scale below, from the lowest level to the highest.",
     "number": "Estimate the quantity asked and choose the range that contains it.",
 }
@@ -77,24 +76,8 @@ def _option_line(letter: str, question: Question, index: int) -> str:
     return f"{letter}. {label}"
 
 
-MEMORY_HEADER = (
-    "Past cases similar to the current state, with the decisions taken. "
-    "Use them only as reference: evaluate the current state."
-)
-
-
-def memory_block(memories: list[str] | None) -> list[str]:
-    """Ricordi richiamati dalla memoria, prima dello stato corrente."""
-    if not memories:
-        return []
-    lines = ["<memories>", MEMORY_HEADER]
-    for number, text in enumerate(memories, 1):
-        lines += [f"[{number}]", text]
-    return lines + ["</memories>", ""]
-
-
-def user_content(state, question: Question, order: list[int], memories: list[str] | None = None) -> str:
-    lines = memory_block(memories) + [
+def user_content(state, question: Question, order: list[int]) -> str:
+    lines = [
         "<state>",
         render_state(state),
         "</state>",
@@ -108,34 +91,34 @@ def user_content(state, question: Question, order: list[int], memories: list[str
     return "\n".join(lines)
 
 
-def build_messages(state, question: Question, order: list[int], memories: list[str] | None = None) -> list[dict]:
+def build_messages(state, question: Question, order: list[int]) -> list[dict]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_content(state, question, order, memories)},
+        {"role": "user", "content": user_content(state, question, order)},
     ]
 
 
-def build_plain(state, question: Question, order: list[int], memories: list[str] | None = None) -> str:
+def build_plain(state, question: Question, order: list[int]) -> str:
     """Formato senza chat template, per i modelli Base."""
-    return f"{SYSTEM_PROMPT}\n\n{user_content(state, question, order, memories)}\n\nAnswer:"
+    return f"{SYSTEM_PROMPT}\n\n{user_content(state, question, order)}\n\nAnswer:"
 
 
-def open_content(state, question: Question, memories: list[str] | None = None) -> str:
-    return "\n".join(memory_block(memories) + [
+def open_content(state, question: Question) -> str:
+    return "\n".join([
         "<state>", render_state(state), "</state>", "", f"Question: {question.instructions}", "",
         "Answer with a single word.",
     ])
 
 
-def build_open_messages(state, question: Question, memories: list[str] | None = None) -> list[dict]:
+def build_open_messages(state, question: Question) -> list[dict]:
     return [
         {"role": "system", "content": OPEN_SYSTEM_PROMPT},
-        {"role": "user", "content": open_content(state, question, memories)},
+        {"role": "user", "content": open_content(state, question)},
     ]
 
 
 def build_state_messages(state) -> list[dict]:
-    """Solo lo stato, per embed."""
+    """Solo lo stato, per il vettore semantico (analyze_state)."""
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(["<state>", render_state(state), "</state>"])},

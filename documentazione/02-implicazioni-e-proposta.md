@@ -11,8 +11,16 @@
 | 26/09/2026 | **Backbone: famiglia Qwen3.5** (come SemIf), non Qwen3.8 | Qwen3.8 non ha taglie piccole né checkpoint Base. Qwen3.5 ha la stessa architettura. Qwen3.8-27B resta candidato come teacher |
 | 26/09/2026 | **Si parte dalla baseline F0 zero-shot**: readout dei logit delle lettere, senza training | Stabilisce il riferimento da battere con LoRA e distillazione. Implementata, vedi [03-baseline-f0.md](03-baseline-f0.md) |
 | 26/09/2026 | **Hardware di sviluppo: RTX 4070 Laptop (8 GB), WSL2** | In bf16 entrano 0.8B e 2B. 4B e 9B solo quantizzati a 4 bit, oppure su GPU cloud |
-| 26/09/2026 | **Nuova direzione: profondità dinamica per asserzione** (§4bis) | Idea dell'utente. Si adatta bene a un modello a singolo forward pass |
-| 26/09/2026 | **`min_confidence` per asserzione + campo globale** (§4bis) | Il chiamante conosce il costo dell'errore. Il locale sovrascrive il globale; di default si usa il modello completo |
+| 26/09/2026 | **Nuova direzione: profondità dinamica per asserzione** (§4bis), abbandonata il 29/09/2026 | Idea dell'utente. Si adatta bene a un modello a singolo forward pass |
+| 26/09/2026 | **`min_confidence` per asserzione + campo globale** (§4bis) | Il chiamante conosce il costo dell'errore. Il locale sovrascrive il globale. Dal 29/09/2026 marca solo le risposte incerte (`status`) |
+| 28/09/2026 | **Italiano e inglese alla pari** | Anche la documentazione è nelle due lingue |
+| 28/09/2026 | **Generalista, ma il primo LoRA su un compito specifico con le immagini** | Le immagini sono il punto più forte del progetto; un compito solo rende chiaro cosa ha funzionato |
+| 28/09/2026 | **Una taglia di modello per volta** | Con 8 GB di GPU, e per non confondere gli effetti |
+| 28/09/2026 | **Nome: Egeria** (prima semLMM) | La ninfa consigliera di Numa: un consigliere piccolo e rapido per chi decide |
+| 29/09/2026 | **Semplificazione:** tolti profondità dinamica, `rank`, la domanda `recall`, `embed` dentro `/v1/systemone`, `inject` | Guadagno reale troppo piccolo (profondità dinamica, `inject`) o duplicati di qualcosa che resta (`rank` = `choice` ordinata; `recall` = `memory.recall`; `embed` = `/v1/embed`) |
+| 29/09/2026 | **`multi` e `known` abbandonati come primitive** | `multi` equivale a N domande Sì/No, che con il riuso dello stato costano poco. Per `known` restano la misura della calibrazione fuori dominio (F0.5) e `memory.min_similarity` |
+| 29/09/2026 | **Tre primitive nuove in roadmap, zero-shot: `span`, `locate`, `why`** (§6) | Ognuna dà qualcosa che non si ottiene combinando quelle esistenti: una risposta ancorata al testo dello stato, una posizione nell'immagine, il motivo di una decisione |
+| 29/09/2026 | **Destra/sinistra fuori dai controlli e dal primo LoRA** | Secondo l'utente lì c'è qualcosa che non funziona alla radice: va rivisto l'esempio con un'indagine a parte |
 
 ## 1. Cosa cambia rispetto all'idea iniziale ("partire da Qwen 3.8")
 
@@ -78,6 +86,8 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 
 ## 4bis. Profondità dinamica per asserzione
 
+> **Abbandonata il 29/09/2026.** Zero-shot il guadagno reale era dello 0.5–4% (punto 1 del piano), e l'esecuzione a blocchi complicava lo scorer: il codice è stato tolto. Resta `min_confidence`, che marca le risposte incerte. La sezione resta come traccia dell'idea.
+
 **Idea.** Ogni asserzione (domanda) usa solo la profondità che le serve. Dopo ogni blocco del modello si legge la distribuzione sulle opzioni. Se la confidenza *calibrata per quel layer* supera una soglia, si esce; altrimenti si prosegue. Le domande facili costano pochi layer, quelle difficili tutto il modello.
 
 **Perché si adatta bene a questo progetto.**
@@ -93,9 +103,9 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 
 **Piano.**
 1. **F0 (fatto).** Diagnostica zero-shot: readout a ogni confine di blocco, temperature per (tipo, layer), simulazione di soglie diverse → curva calcolo/accuratezza. Risultato: il risparmio potenziale (oracolo) è del 27–36%, quello ottenuto con la confidenza zero-shot solo dello 0.5–4%, sempre con accordo del 100% con il modello completo. Vedi [03-baseline-f0.md](03-baseline-f0.md) §6.2.
-2. **API e uscita reale (fatto).** Parametro `min_confidence` per asserzione, con campo globale nella richiesta e default del server. Il valore locale sovrascrive il globale; senza soglia si usa il default prudente, cioè il modello completo. Esecuzione blocco per blocco con rimozione delle domande già decise; risposta con `depth` e `status` (`decided`/`uncertain`). La soglia è sulla confidenza corretta per il caso (0 = a caso, 1 = certezza). Misura della latenza: la richiesta aspetta la domanda più profonda. Su GPU il guadagno di latenza arriva solo se escono tutte le domande; su CPU è proporzionale. Vedi [03-baseline-f0.md](03-baseline-f0.md) §6.4.
-3. **F1.** Teste di uscita addestrate su ogni confine di blocco, con loss propria su tutte le uscite. Soglia scelta con conformal risk control, in modo che `min_confidence` diventi una garanzia empirica di accuratezza.
-4. **F3.** Cascata a più livelli: uscita anticipata → modello completo → modello più grande o thinking → escalation umana. `status: uncertain` è il segnale d'ingresso.
+2. **API e uscita reale (fatto, poi tolto il 29/09/2026; resta `min_confidence` con `status`).** Parametro `min_confidence` per asserzione, con campo globale nella richiesta e default del server. Il valore locale sovrascrive il globale; senza soglia si usa il default prudente, cioè il modello completo. Esecuzione blocco per blocco con rimozione delle domande già decise; risposta con `depth` e `status` (`decided`/`uncertain`). La soglia è sulla confidenza corretta per il caso (0 = a caso, 1 = certezza). Misura della latenza: la richiesta aspetta la domanda più profonda. Su GPU il guadagno di latenza arriva solo se escono tutte le domande; su CPU è proporzionale. Vedi [03-baseline-f0.md](03-baseline-f0.md) §6.4.
+3. **F1 (non più in programma).** Teste di uscita addestrate su ogni confine di blocco, con loss propria su tutte le uscite. Soglia scelta con conformal risk control, in modo che `min_confidence` diventi una garanzia empirica di accuratezza.
+4. **F3 (non più in programma nella forma a blocchi).** Cascata a più livelli: uscita anticipata → modello completo → modello più grande o thinking → escalation umana. `status: uncertain` è il segnale d'ingresso.
 
 ## 5. Valutazione proposta
 
@@ -110,13 +120,13 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 - **Metriche:** accuratezza, NLL, Brier, ECE (binning dichiarato), copertura al 5% d'errore, latenza p50/p95 del solo modello.
 - **Baseline da battere:** SemIf zero-shot (stesso backbone), Kev-4B/9B, decider-4b, Laya-multilingual, Jev (via API, se c'è budget).
 
-## 5bis. Limiti attuali di Egeria (settembre 2026)
+## 5bis. Limiti attuali di Egeria (aggiornati al 29/09/2026)
 
 - **Zero-shot su typed-decisions siamo al livello della prior:** 0.468 contro 0.478. Sopra Laya base (0.362), ma sotto una baseline banale. Ciò che batte la prior è il voto dei ricordi (0.562).
-- **Costo lineare nel numero di domande, e doppio per le permutazioni.** Lo stato viene rielaborato per ogni domanda e per ogni permutazione, anche se il formato (stato prima della domanda) permetterebbe di calcolarlo una volta.
+- **Costo per domanda e per permutazione:** in parte risolto il 29/09/2026 con il riuso dello stato ([08-riuso-dello-stato.md](08-riuso-dello-stato.md)). Con le immagini il tempo scende fino all'80%; sui testi brevi su GPU resta il costo fisso di ogni passaggio, e le domande `open` non condividono ancora il prefisso.
 - **La calibrazione non si trasferisce.** Le temperature di typed-decisions peggiorano le domande generiche e le immagini, non c'è un termine di spostamento, e l'inclinazione verso il "Sì" non è misurata.
-- **Il profilo di latenza è diverso da Laya.** Un LLM da 0.8–2B per token costa più di un encoder da 421M; la compensazione possibile è il riuso dello stato.
-- **Profondità dinamica** con poco guadagno reale zero-shot; **al massimo 26 opzioni**; `inject`, `known` e `surprise` senza effetto zero-shot.
+- **Il profilo di latenza è diverso da Laya.** Un LLM da 0.8–2B per token costa più di un encoder da 421M; il riuso dello stato compensa in parte (fatto, [08](08-riuso-dello-stato.md)).
+- **Al massimo 26 opzioni** per domanda (una lettera per opzione); `known` e `surprise` senza effetto zero-shot.
 
 **Priorità per migliorare il modello, dalla meno costosa:**
 1. **Riuso dello stato fra le domande** (prefix-fork, anche delle immagini).
@@ -124,16 +134,28 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 3. **Calibrazione temperatura + spostamento per fascia di opzioni**, valutata fuori dominio.
 4. **F1** con loss supervisionata propria, dati contro le scorciatoie, permutazioni con loss di coerenza, etichette umane soft.
 
-## 6. Roadmap indicativa
+## 6. Roadmap (rivista il 29/09/2026)
 
-| Fase | Obiettivo | Output |
-|---|---|---|
-| F0 | Setup e baseline zero-shot: logit delle lettere su Qwen3.5 (0.8B/2B in bf16, 4B/9B in 4 bit) e diagnostica della profondità dinamica | **Completata**: nessun modello piccolo batte la Prior zero-shot; profondità dinamica con 27–36% di risparmio potenziale (vedi [03-baseline-f0.md](03-baseline-f0.md) §6) |
-| F1 | LoRA + pointer head su dati pubblici, teste di uscita per la profondità dinamica. Più le primitive rinviate: `multi` (loss propria per opzione) e `known` (loss propria su coppie stesso/simile/nuovo + embedding contrastivo con LoRA), vedi [06-memoria.md](06-memoria.md) §7 | Primo checkpoint e confronto con Kev/decider |
-| F2 | Distillazione soft da Qwen3.8-27B e set italiano | Checkpoint v1 multilingua |
-| F3 | Calibrazione, astensione, invarianza all'ordine | Report risk–coverage |
-| F4 | Serving: prefix-fork, API compatibile Jev, quantizzazione, risposte progressive (streaming per domanda) e batching continuo a livello di blocco | Server di inferenza |
-| F5 (opz.) | RL con feedback reale; loss ausiliaria LLM-JEPA | Ablation |
+| Fase | Cosa | Dove | Criterio per dire "fatto" |
+|---|---|---|---|
+| F0 | Setup e baseline zero-shot: logit delle lettere su Qwen3.5 (0.8B/2B in bf16, 4B/9B in 4 bit) e diagnostica della profondità dinamica | In locale | **Completata**: nessun modello piccolo batte la Prior zero-shot (vedi [03-baseline-f0.md](03-baseline-f0.md) §6) |
+| Semplificazione | Tolti profondità dinamica, `rank`, la domanda `recall`, `embed` dentro `/v1/systemone`, `inject` | In locale | **Completata il 29/09/2026**: test verdi, interfaccia ricollaudata, prove con il modello su testo, immagini e ricordi |
+| **F0.5**, misurare e accelerare senza training | 1) **Riuso dello stato** fra domande e permutazioni, testo e immagini: **fatto il 29/09/2026** ([08-riuso-dello-stato.md](08-riuso-dello-stato.md)). 2) **Controlli senza etichette:** posizione (opzioni identiche), "Sì" (domanda e sua negazione), lingua (stessa domanda in italiano e in inglese). 3) **Calibrazione** temperatura + spostamento per tipo, separata per testo e immagini, valutata fuori dominio. 4) **Set di valutazione** in italiano e inglese: quello del primo LoRA più un piccolo set di testo generico | In locale | Stesse risposte e latenza ridotta. Un numero per ciascun controllo. Decisione su 1 o 2 permutazioni |
+| **Primitive nuove** (zero-shot) | 1) **`span`**, subito dopo F0.5: un pezzo di testo copiato alla lettera dallo stato (numero di fattura, IBAN, nome, data). È il completamento di `open` limitato ai token che continuano un pezzo presente nello stato, quindi non può inventare. Solo per stati di testo. 2) **`locate`**, insieme all'indagine su destra/sinistra: un riquadro o un punto nell'immagine, dalle coordinate che i modelli visivi Qwen sanno produrre (una ventina di token generati). 3) **`why`**, quando si lavora sull'interfaccia per gli operatori: le frasi dello stato che hanno deciso, togliendone una alla volta e misurando quanto cambia la probabilità (N passaggi in un batch; all'inizio solo testo) | In locale | Ognuna ha un set di prova e una soglia fissati **prima** dei risultati, e si tiene solo se la supera. Per `span`: accuratezza almeno pari a `open` sullo stesso set, e zero risposte non presenti nello stato |
+| **F1**, primo LoRA su un compito con le immagini | Compito da scegliere (§7). Readout a lettere invariato; loss soft CE + Brier; aumentazioni: permutazioni, negazioni; italiano e inglese. Una sola taglia: 2B se entra in 8 GB, altrimenti 0.8B | In locale | Meglio dello zero-shot sul compito. Meno "Sì" di troppo. Nessun peggioramento sul testo e su `suite_immagini` |
+| **F2**, LoRA generalista | Testo e immagini, italiano e inglese. Etichette umane (anche con più annotatori, per esempio ChaosNLI) e il train di typed-decisions. Dati contro le scorciatoie (§4) | In locale | Sopra la prior (0.478) e il voto dei ricordi (0.562), verso 0.766. Nessun peggioramento fuori dominio |
+| **F3**, scala | Modelli 4B/9B, etichette da un teacher grande insieme a quelle umane | GPU a noleggio | Solo se F2 mostra un guadagno |
+
+**Parcheggiati:** profondità dinamica addestrata, il modello come attuatore (giochi, robot), streaming e batching continuo nel server.
+
+**Esempi d'uso da aggiungere alla documentazione** (nessun codice nuovo):
+- **"Non si può dire":** una `choice` con un'opzione esplicita "lo stato non lo dice" al posto di una `noul`. Dà al modello una via d'uscita invece del "Sì" forzato; il controllo sul "Sì" di F0.5 dirà quanto aiuta.
+- **Due fotogrammi o due casi nello stesso stato,** con una `noul` "è cambiato qualcosa?" oppure "è lo stesso caso?". Da verificare.
+
+**Indagine a parte:** destra/sinistra nelle immagini, a partire dall'esempio dell'utente. Indizi da verificare:
+- `load_images` non applica l'orientamento EXIF;
+- "destra" è ambigua (la destra della persona o di chi guarda);
+- il fotogramma della webcam rispetto a ciò che vede l'utente.
 
 ## 7. Decisioni aperte
 
@@ -142,7 +164,14 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
    - LoRA su 4B/9B: 48–80 GB.
 
    Da decidere: provider e budget.
-2. **Lingua target.** Italiano prioritario o inglese?
-3. **Scopo.** Modello generalista (tipo Jev) o verticale su un dominio specifico?
-4. **Compatibilità API Jev.** La F0 è già compatibile con il formato di richiesta e risposta. Resta da decidere se esporre anche un server HTTP `/v1/systemone`.
+2. **Lingua target.** Decisa il 28/09/2026: italiano e inglese alla pari.
+3. **Scopo.** Deciso il 28/09/2026: generalista, con il primo LoRA su un compito specifico con le immagini.
+4. **Compatibilità API Jev.** Fatta: `/v1/systemone` è esposto sia dal server del modello sia dal server web.
 5. **Licenza e pubblicazione.** Rilascio open (Apache-2.0) o uso interno?
+6. **Compito del primo LoRA (F1).** Candidati:
+   - **pose di danza:** AIST++, con etichette calcolate dai punti del corpo, formulate senza destra/sinistra; le pose classiche con nome come set di valutazione;
+   - **Galaxy Zoo:** domande a scelta con le frazioni di voto dei volontari, cioè probabilità umane vere;
+   - **relazioni spaziali (VSR):** solo dopo l'indagine su destra/sinistra.
+
+   Da verificare per tutti: licenza e dimensioni.
+7. **`multi` e `known`.** Decisi il 29/09/2026: abbandonati come primitive (§0).

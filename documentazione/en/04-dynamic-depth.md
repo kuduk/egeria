@@ -5,6 +5,8 @@
 > **Proposal.** Each assertion (question) uses only as much compute depth as it needs. Easy decisions exit early; uncertain ones keep going.
 >
 > **Status.** Feasibility measured in F0 with "logit lens" readouts at block boundaries. Results in [03-baseline-f0.md](03-baseline-f0.md).
+>
+> **Abandoned on 29/09/2026.** The potential (oracle) saving was 27–36%, but the saving achieved zero-shot with the confidence was only 0.5–4%, and the block-wise execution path complicated the scorer. The code (early exit, intermediate readouts, per-layer temperatures, `depth.py`, `--exits`, `--depth`) has been removed. `min_confidence` remains: today it only serves to flag uncertain answers (`status`). The document is kept as a record of the idea and of the measurements.
 
 ## 1. Why it fits a System 1 model well
 

@@ -15,7 +15,7 @@ from egeria.scorer import DecisionScorer
 
 TICKET = json.load(open("examples/ticket_it.json"))["state"]
 
-RANK = [  # (stato, domanda, opzioni, prima attesa)
+PRIORITA = [  # (stato, domanda, opzioni, scelta attesa): "cosa va fatto per primo" come choice
     (TICKET, "Quale azione va fatta per prima?",
      {"riparare_pagamenti": "Risolvere il problema dei pagamenti", "offrire_sconto": "Offrire uno sconto commerciale",
       "inviare_newsletter": "Inviare la newsletter mensile"}, "riparare_pagamenti"),
@@ -64,13 +64,13 @@ def main() -> None:
     report = {}
 
     ok = 0
-    for state, question, criteria, expected in RANK:
-        result = scorer.decide({"state": state, "questions": {"q": {"type": "rank", "instructions": question,
+    for state, question, criteria, expected in PRIORITA:
+        result = scorer.decide({"state": state, "questions": {"q": {"type": "choice", "instructions": question,
                                                                       "criteria": criteria}}}, permutations=2)
-        ranking = result["answers"]["q"]["ranking"]
-        ok += ranking[0] == expected
-        print(f"rank   {'✓' if ranking[0] == expected else '✗'} {question[:45]:45s} -> {ranking}")
-    report["rank"] = (ok, len(RANK), ok >= 3)
+        chosen = result["answers"]["q"]["choice"]
+        ok += chosen == expected
+        print(f"prima  {'✓' if chosen == expected else '✗'} {question[:45]:45s} -> {chosen}")
+    report["priorita"] = (ok, len(PRIORITA), ok >= 3)
 
     ok = 0
     for state, question, edges, unit, expected in NUMBER:

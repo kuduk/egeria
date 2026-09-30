@@ -109,12 +109,12 @@ The answers are identical and the probabilities match within bf16 noise.
 
 **Takeaways:**
 - **With small images, repetition is cheap.** On the 0.8B at 224 px the 2 extra questions, image included, cost 9 ms (42 → 51 ms). The shared variant makes **two sequential passes** (prefix, then tails), so it pays the fixed per-pass cost twice, about 35–40 ms of small kernels on the 0.8B.
-- **With large images or more questions, sharing wins clearly**, up to −58%, because each extra question costs only its tail. The multimodal scorer will have to pick the strategy based on visual tokens × questions.
+- **With large images or more questions, sharing wins clearly**, up to −58%, because each extra question costs only its tail. Since 29/09/2026 the scorer picks it by itself, based on the avoided tokens: with the suite images the time drops by up to 80% ([08-state-reuse.md](08-state-reuse.md)).
 - **The real limit is the fixed per-pass cost**: 42 ms for one question on the 0.8B, of which only 8 ms is the vision tower.
 
 **Next steps towards real time:**
-1. **CUDA graphs on our layer loop.** `torch.compile` breaks on the custom kernels. In streaming, however, shapes are fixed, so the scorer's block-by-block loop can be captured by hand, with precomputed masks and rotary embeddings, for both the prefix and the tails. This attacks the fixed cost directly.
-2. **Dynamic depth.** In a video stream most frames are "nothing is happening", with very confident answers (the cat: "nessuna azione" ("no action"), "pericolo: no" ("danger: no") at 0.99). These are ideal cases for exiting early.
+1. **CUDA graphs on our layer loop.** `torch.compile` breaks on the custom kernels. In streaming, however, shapes are fixed, so the scorer's forward pass can be captured by hand, with precomputed masks and rotary embeddings, for both the prefix and the tails. This attacks the fixed cost directly.
+2. **Dynamic depth** (abandoned on 29/09/2026). In a video stream most frames are "nothing is happening", with very confident answers (the cat: "nessuna azione" ("no action"), "pericolo: no" ("danger: no") at 0.99): these would have been ideal cases for exiting early. Zero-shot, however, the real gain was only 0.5–4% ([03-baseline-f0.md](03-baseline-f0.md) §6), and the code has been removed.
 3. **Recurrent state across frames.** The Gated DeltaNet layers have a fixed-size state. In principle only the tokens of the new frame could be processed, keeping the state: the cache of the full-attention layers would still need to be handled with a window. To be explored.
 4. **System 1 → System 2 cascade.** Per-frame decisions run at 10–20 fps on the small model, and only `uncertain` or relevant events go to a large model.
 
@@ -123,12 +123,10 @@ The answers are identical and the probabilities match within bf16 noise.
 - **State.** It is a **list of parts**: `{"type": "text", "text": ...}` and `{"type": "image", "path" | "url" | "base64": ...}`. Multiple images are allowed and their order is preserved in the prompt.
 - **`image_max_side`** (optional, 64–4096): downscales the images, so the number of visual tokens and the latency go down (§4).
 - **Model loading.** `egeria decide` detects images in the state and loads the full model with the vision tower on its own (`--vision` forces it). Memory for the 2B in bf16 is 4.4 GB.
-- **Supported question types:** `noul`, `choice`, `score`, `rank`, `number`, with permutations and `min_confidence` (the `status` is computed at the last layer).
-- **`embed` and `memory` also work with images:** the vector includes the visual tokens. Check: 5/6 in [06-memory.md](06-memory.md) §6.
+- **Supported question types:** `noul`, `choice`, `score`, `number` and `open`, with permutations and `min_confidence` (below the threshold the answer is `uncertain`).
+- **Memory and the state vector (`/v1/embed`) also work with images:** the vector includes the visual tokens. Check: 5/6 in [06-memory.md](06-memory.md) §6.
 - **`open` (one word or a value) also works with images** and reads dates, amounts and codes (§7).
-- **Not yet supported with images:**
-  - early exit, because the M-RoPE positions of the visual tokens require the adapted layer loop.
-- **Efficiency.** The prompt with the image is repeated for every question and permutation. With small images this costs little; with large images the shared prefix (§4) pays off, but it is still to be integrated.
+- **Efficiency.** Since 29/09/2026 the instructions and images are computed once for all questions and permutations, when it pays off (`auto` mode, [08-state-reuse.md](08-state-reuse.md)). With small images and few questions each question keeps its full prompt, which is cheaper there.
 
 ## 6. Usage examples
 
@@ -196,7 +194,7 @@ Actual response (2B-Base, 2.3 s including image loading):
   "min_confidence": 0.6,
   "questions": {
     "incendio": {"type": "noul", "instructions": "C'è un incendio in corso?"},
-    "azione": {"type": "rank", "instructions": "Quale azione è più appropriata?",
+    "azione": {"type": "choice", "instructions": "Quale azione è più appropriata?",
                "criteria": {"chiamare_vigili": "Chiamare subito i vigili del fuoco",
                             "monitorare": "Monitorare la situazione", "nessuna": "Nessuna azione"}}
   }
@@ -205,7 +203,7 @@ Actual response (2B-Base, 2.3 s including image loading):
 
 ```json
 "incendio": {"type": "noul", "noul": 0.969, "confidence": 0.938, "min_confidence": 0.6, "status": "decided"},
-"azione": {"type": "rank", "ranking": ["chiamare_vigili", "nessuna", "monitorare"],
+"azione": {"type": "choice", "choice": "chiamare_vigili",
   "probabilities": {"chiamare_vigili": 0.942, "monitorare": 0.028, "nessuna": 0.030},
   "confidence": 0.913, "min_confidence": 0.6, "status": "decided"}
 ```

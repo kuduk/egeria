@@ -22,7 +22,7 @@ uv pip install --python .venv/bin/python -e ".[model,eval,vision,server]"   # fi
 Then, in the browser (from Windows too, if the server runs in WSL): **http://localhost:8000/**.
 
 - **Startup order:** it does not matter. If the model does not respond, the UI flags it at the top ("Modello non raggiungibile", "Model unreachable") and, on the first question, explains how to start it. History and memories remain available.
-- **Switching model without closing the UI:** stop and restart only `model-server`, for example with `--model Qwen/Qwen3.5-0.8B-Base`. History and memories do not change.
+- **Switching model without closing the UI:** stop and restart only `model-server`, for example with `--model Qwen/Qwen3.5-0.8B-Base`. History and memories do not change: on the first question with memories, their vectors are recomputed for the new model ([06-memory.md](06-memory.md) §5).
 - **Stopping them:** `Ctrl+C` in each terminal. If they were started in the background:
   - `pgrep -f '^/home/kuduk/egeria/.venv/bin/python .venv/bin/egeria model-server' | xargs kill`
   - `pgrep -f '^/home/kuduk/egeria/.venv/bin/python .venv/bin/egeria serve' | xargs kill`
@@ -41,7 +41,7 @@ Then, in the browser (from Windows too, if the server runs in WSL): **http://loc
 browser ──HTTP──▶ egeria serve (port 8000)             ──HTTP──▶ egeria model-server (port 8100)
                   web UI, history (SQLite),                      Qwen3.5 on the GPU, GPU lock
                   uploaded images, memories,                     stateless: no history,
-                  memory vote, recall questions                  no memories, no files
+                  memory vote                                    no memories, no files
 ```
 
 | | `egeria model-server` | `egeria serve` |
@@ -50,23 +50,21 @@ browser ──HTTP──▶ egeria serve (port 8000)             ──HTTP─�
 | Dependencies | torch, transformers, GPU | fastapi, uvicorn, httpx, numpy: **no torch** |
 | State | none | `runs/console/`, `runs/memoria-console/` |
 | Default port | 8100 | 8000 |
-| Restart it to | change model, calibration, permutations | update the web UI |
+| Restart it to | change model, calibration, permutations, state reuse (`--share-state`, [08](08-state-reuse.md)) | update the web UI |
 
 **How a question flows:**
 1. The web server validates the request and, if the state contains images given as a path, reads them and converts them to base64. It only accepts files inside the project or inside the data folder.
-2. If memories are needed (`memory.recall` or `recall` questions) and the store is not empty, it asks the model for the state vector (`POST /v1/embed`) and searches for the most similar memories.
-3. It sends the model (`POST /v1/systemone`) the request **without** `memory` and **without** the `recall` questions. With `memory.inject` it adds the memories, already rendered as text (`"memories": [...]`).
-4. To the model's response it adds the memory vote (`answers[q].memory`), the `recall` answers and the recalled memories (`memories`), in the order of the questions in the request.
-
-With only `recall` questions, the model only computes the vector: the decision call is skipped.
+2. If memories are needed (`memory.recall` > 0) and the store is not empty, it asks the model for the state vector (`POST /v1/embed`) and searches for the most similar memories.
+3. It sends the model (`POST /v1/systemone`) the request **without** `memory`: the model receives only the state and the questions.
+4. To the model's response it adds the memory vote (`answers[q].memory`) and the recalled memories (`memories`).
 
 ### Model server API
 
 | Method and path | Body | Response |
 |---|---|---|
 | `GET /v1/info` | | model, device, GPU, vision component, permutations, default threshold, calibration |
-| `POST /v1/systemone` | Jev body (`state`, `questions`, `min_confidence`, `image_max_side`, `embed`) plus `permutations` (1–8), `calibrated` (`false` = raw probabilities), `memories` (up to 10 texts to put in the prompt) | Jev response with the Egeria extensions |
-| `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (L2-normalized), `embedding_dim`, `input_tokens`, `latency_ms` |
+| `POST /v1/systemone` | Jev body (`state`, `questions`, `min_confidence`, `image_max_side`) plus `permutations` (1–8) and `calibrated` (`false` = raw probabilities) | Jev response with the Egeria extensions |
+| `POST /v1/embed` | `{"state": ..., "image_max_side": 448}` | `embedding` (L2-normalized), `embedding_dim`, `model` (the model that computed it), `input_tokens`, `latency_ms` |
 
 Example, directly against the model server:
 
@@ -176,8 +174,8 @@ Settings are kept in the browser.
 
 | Method and path | Use |
 |---|---|
-| `POST /v1/systemone` | Jev-compatible API, with the Egeria extensions **and memories** (`memory.recall`, `vote`, `inject`, `recall` questions) |
-| `GET /api/info` | model and model server status (`model_status`: `ok` or `non_raggiungibile`), number of memories and of analyses |
+| `POST /v1/systemone` | Jev-compatible API, with the Egeria extensions **and memories** (`memory.recall`, `memory.min_similarity`, `memory.vote`) |
+| `GET /api/info` | model and model server status (`model_status`: `ok` or `non_raggiungibile`), number of memories and of analyses, model of the memory vectors (`memory_model`) and suspended memories (`memories_suspended`) |
 | `GET /api/cases?view=da_rivedere\|tutti` | history |
 | `POST /api/cases` | `{"request": <body /v1/systemone>}`: analyzes and saves to history |
 | `GET /api/cases/{id}`, `POST /api/cases/{id}/review` | detail; saving to memories with `{"decisions": {...}, "note": ...}` |
@@ -206,7 +204,7 @@ Manual tests along the full path:
 - photo given as a path: reaches the model as base64; the saved memory is recalled with similarity 1.0 and votes on the answer;
 - the same photo sent as a path directly to the model server: rejected with `422`.
 
-The automated tests ([tests/test_server.py](../../tests/test_server.py)) make the real HTTP client talk to the model server running in-process. They cover the token, rejected paths, calibration never applied to images, memories and recall computed by the web server, base64 images, and an unreachable model (`503`).
+The automated tests ([tests/test_server.py](../../tests/test_server.py)) make the real HTTP client talk to the model server running in-process. They cover the token, rejected paths, calibration never applied to images, memories and vote computed by the web server, base64 images, and an unreachable model (`503`).
 
 **Bugs found and fixed through the acceptance test:**
 - empty probability bars (inline element without `display: block`);
@@ -216,6 +214,7 @@ The automated tests ([tests/test_server.py](../../tests/test_server.py)) make th
 ## 9. Design choices
 
 - **No build step:** static HTML, CSS and JS served by FastAPI. The DOM is built only with `textContent` (no XSS).
+- **Video from file, in live mode:** only MP4, WebM, Ogg, MOV and MKV are accepted. The file becomes a `blob:` URL whose type comes from a fixed table (not from the file), and the previous URL is released when the video changes. This fixed, on 29/09/2026, the CodeQL alert `js/xss-through-dom`, verified locally with CodeQL 2.27.1: zero alerts with the code scanning suite and with `security-extended`.
 - **Style:** dark or light theme, Fira Sans/Fira Code, SVG icons.
   - **Logo:** [img/logo.png](../../src/egeria/web/img/logo.png). The top bar shows the emblem on a light rounded tile, identical in both themes, next to the name in letter-spaced capitals like the lettering in the logo. The light tile is needed because the face is drawn with the white of the background: on a dark background the emblem would turn into a negative.
   - **Derived images:** emblem, favicon, iPhone icon and the two 1280×640 social previews for GitHub (centered logo, or emblem and lettering side by side) are generated with `.venv/bin/python scripts/genera_icone.py`, to be rerun whenever the logo changes.

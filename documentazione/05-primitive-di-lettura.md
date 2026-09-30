@@ -2,7 +2,13 @@
 
 # Primitive di lettura oltre noul, choice e score
 
-> Stato: implementate e **verificate** `rank`, `number`, `open` ed `embed` (§4). **Tolte** perché non hanno superato la prova: `multi` (bias verso il "sì", tornerà con il training F1) e `surprise` (AUROC 0.50). Quelle con training (`span`, `locate`, `value`, `tags`, `why`) sono da fare. Esempi d'uso nella §5.
+> Stato: implementate e **verificate** `number` e `open` (§4), più il vettore semantico dello stato, che oggi si chiede solo con `POST /v1/embed` del server del modello.
+>
+> **Tolte:**
+> - il 29/09/2026, per semplificare: `rank`, che è una `choice` con le opzioni ordinate per probabilità, ed `embed` dentro `/v1/systemone`;
+> - prima, perché non hanno superato la prova: `multi` (bias verso il "sì") e `surprise` (AUROC 0.50). Il 29/09/2026 `multi` è stata abbandonata anche come obiettivo per il training: equivale a N domande Sì/No.
+>
+> Quelle con training (`span`, `locate`, `value`, `tags`, `why`) sono da fare. Esempi d'uso nella §5.
 
 ## 1. Cosa si può leggere in un solo forward pass
 
@@ -18,16 +24,18 @@ Da qui si possono ricavare altre primitive senza generare testo.
 | Primitiva | Restituisce | Come si legge | Esempio |
 |---|---|---|---|
 | `multi` (tolta, vedi §4) | probabilità indipendente per ogni opzione | una `noul` per opzione, nello stesso batch | problemi presenti in un ticket |
-| `rank` | ordinamento completo con probabilità | distribuzione della `choice` | riordinare documenti o azioni |
+| `rank` (tolta il 29/09/2026) | ordinamento completo con probabilità | distribuzione della `choice`: basta ordinarla | riordinare documenti o azioni |
 | `number` (a intervalli) | valore atteso + intervallo | `score` con intervalli numerici come livelli | quante persone nell'immagine |
 | `open` | top-k su tutto il vocabolario | softmax sull'lm_head completo nell'ultima posizione | colore dell'auto, senza elencare le opzioni (risposte di un solo token) |
-| `embed` | vettore semantico dello stato | hidden finale (come Qwen3-Embedding) | ricerca di casi simili, deduplica, cambio di scena nel video |
-| `recall` | i ricordi più simili (con decisioni e note) | ricerca nella memoria con l'`embed` dello stato | "cosa ti ricorda?" ([06-memoria.md](06-memoria.md) §7) |
-| `known` (non tenuta) | già visto / simile / nuovo | soglie sulla similarità con la memoria | "è qualcosa che hai in memoria?" ([06-memoria.md](06-memoria.md) §7) |
+| vettore dello stato (`/v1/embed`) | vettore semantico dello stato | hidden finale (come Qwen3-Embedding) | ricerca di casi simili, deduplica, cambio di scena nel video |
+| ricordi simili (`memory.recall`) | i ricordi più simili (con decisioni e note) | ricerca nella memoria con il vettore dello stato | "cosa ti ricorda?" ([06-memoria.md](06-memoria.md) §7). Come tipo di domanda `recall` è stata tolta il 29/09/2026 |
+| `known` (non tenuta, abbandonata il 29/09/2026) | già visto / simile / nuovo | soglie sulla similarità con la memoria | "è qualcosa che hai in memoria?" ([06-memoria.md](06-memoria.md) §7) |
 | `surprise` (tolta, vedi §4) | quanto lo stato è inatteso | log-probabilità del modello sui token dello stato | anomalie in email o fotogrammi |
-| incertezza | entropia, margine, profondità d'uscita, accordo fra permutazioni | già calcolati in parte (`depth`, `status`) | difficoltà della decisione |
+| incertezza | entropia, margine, accordo fra permutazioni | già calcolata in parte (`status` rispetto a `min_confidence`) | difficoltà della decisione |
 
 ### Con una testa addestrata
+
+`span`, `locate` e `why` sono in roadmap anche in una versione **zero-shot**, senza testa addestrata (§3 e [02-implicazioni-e-proposta.md](02-implicazioni-e-proposta.md) §6).
 
 | Primitiva | Restituisce | Come | Esempio |
 |---|---|---|---|
@@ -45,38 +53,38 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 |---|---|---|---|---|
 | `noul`, `choice`, `score` | ✓ | ✓ | ✓ | ✓ |
 | Soglia per domanda / astensione | ✗ | testa act/escalate non funzionante | ✓ `min_confidence` + `status` | ✓ |
-| Profondità dinamica | ✗ | ✗ | ✓ | ✓ |
-| Stato con immagini | ✗ | ✗ | prototipo | ✓ |
-| `multi`, `rank`, `number`, `open` | ✗ (solo il valore atteso di `score`) | ✗ | – | ✓ zero-shot |
-| `embed`, `surprise` | ✗ | ✗ | – | ✓ zero-shot |
+| Profondità dinamica | ✗ | ✗ | tolta il 29/09/2026 (guadagno reale zero-shot 0.5–4%) | – |
+| Stato con immagini | ✗ | ✗ | ✓ | ✓ |
+| `number`, `open` | ✗ (solo il valore atteso di `score`) | ✗ | ✓ zero-shot | ✓ |
+| Vettore dello stato e memoria | ✗ | ✗ | ✓ (`/v1/embed`, `memory`) | ✓ |
 | `span`, `locate`, `value`, `tags` | ✗ | ✗ | – | con training |
 | Fine-tuning del cliente | ✗ | ✓ | ✓ | ✓ |
 | Esecuzione locale | ✗ (cloud) | ✓ | ✓ | ✓ |
 
 ## 3. Priorità proposte
 
-1. **`embed` per il video in tempo reale.** Il vettore del fotogramma è gratuito nello stesso passaggio: si fanno le domande solo quando la scena cambia.
-2. **`locate` sulle immagini.** "Sì, qui" è molto più utile di "sì".
-3. **`span`** per estrarre valori dai documenti senza generazione.
-4. **`open`**: economica e zero-shot. (`multi` rinviata alla F1.)
+1. **Il vettore dello stato per il video in tempo reale.** Il vettore del fotogramma è gratuito nello stesso passaggio: si fanno le domande solo quando la scena cambia.
+2. **`span`** (in roadmap, subito dopo F0.5): valori copiati alla lettera dallo stato, senza training. Il completamento di `open` accetta solo i token che continuano un pezzo presente nello stato, quindi la risposta non può essere inventata.
+3. **`locate`** (in roadmap, con l'indagine su destra/sinistra): "sì, qui" è molto più utile di "sì". Zero-shot, dalle coordinate che i modelli visivi Qwen sanno produrre.
+4. **`why`** (in roadmap, con l'interfaccia per gli operatori): le frasi dello stato che hanno deciso, togliendone una alla volta.
+5. **`open`**: economica e zero-shot. (`multi` abbandonata il 29/09/2026: si usano N domande Sì/No.)
 
 ## 4. Implementazione e verifica (zero-shot)
 
 | Tipo | Come è fatto | Risposta |
 |---|---|---|
-| `rank` | readout a lettere come `choice` | `ranking`, `probabilities`, `confidence` |
 | `number` | readout ordinale come `score`, sugli intervalli; `null` = estremo aperto | `value` (valore atteso sui punti medi), `interval` (10–90%, uniforme a tratti), `range`, `probabilities`, `unit` |
 | `open` | softmax sull'intero vocabolario (token speciali esclusi). Le candidate si completano fino al confine di parola: un prefill + ≤4 token in greedy, cache duplicata | `answer`, `candidates` con `p` (probabilità del primo token), `confidence` |
-| `embed` | media degli hidden finali sui token dello stato, normalizzata | `state.embedding`, `state.embedding_dim` |
+| vettore dello stato (`POST /v1/embed`) | media degli hidden finali sui token dello stato, normalizzata | `embedding`, `embedding_dim` |
 
 **Verifica** ([scripts/verifica_primitive.py](../scripts/verifica_primitive.py), 2B-Base, soglie decise prima dei risultati). Si tiene una primitiva solo se supera la soglia.
 
 | Primitiva | Prova | Soglia | Risultato | Esito |
 |---|---|---|---|---|
-| `rank` | 4 situazioni con azione prioritaria ovvia | ≥ 3/4 | **4/4** | tenuta |
+| `rank` | 4 situazioni con azione prioritaria ovvia | ≥ 3/4 | **4/4** | tenuta, poi tolta il 29/09/2026: la stessa prova oggi si fa con `choice` |
 | `number` | 5 quantità scritte nel testo (giorni, persone, euro, kg, minuti) | ≥ 4/5 nell'intervallo | **5/5** (15.4 persone, 1.303 €, 7.7 kg, 39 min) | tenuta |
 | `open` | 6 risposte di una parola (giorno, lingua, città, colore, mese, cognome) | ≥ 5/6 | **6/6** | tenuta |
-| `embed` | recupero di casi con le stesse decisioni (kNN su typed-decisions) | meglio della Prior | **0.564** contro 0.478, come Qwen3-Embedding-0.6B | tenuta |
+| `embed` | recupero di casi con le stesse decisioni (kNN su typed-decisions) | meglio della Prior | **0.564** contro 0.478, come Qwen3-Embedding-0.6B | tenuta (oggi con `/v1/embed` e la memoria) |
 | `surprise` | 6 testi normali contro 6 anomali | AUROC ≥ 0.85 | **0.50** | **tolta** |
 | `multi` | ticket e foto | – | 0.8B: "sì" a quasi tutto (bias verso il sì, non correggibile con la temperatura) | **tolta** |
 
@@ -87,38 +95,13 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) ha **solo** `noul`, `choice` e `score` su u
 
 **Limiti noti delle primitive tenute:**
 - `open` risponde con una sola "parola" o un valore. La probabilità riguarda il primo token; il completamento prosegue fino al primo spazio (entro 16 token), così date, importi e codici escono interi (una data completa nel formato "gg.mm.aaaa", l'importo "14,21"). Funziona anche con le immagini ([04-stato-con-immagini.md](04-stato-con-immagini.md) §7).
-- `embed` costa un passaggio in più sullo stato.
+- il vettore dello stato costa un passaggio in più sullo stato.
 
 ## 5. Esempi d'uso
 
 Tutti gli esempi sono in [examples/primitive/](../examples/primitive/). Gli output qui sotto sono **reali** (Qwen3.5-2B-Base, 2 permutazioni, RTX 4070 Laptop). Una richiesta può contenere domande di tipi diversi insieme ([examples/primitive_it.json](../examples/primitive_it.json)).
 
-### `rank`: ordinare le opzioni
-
-```bash
-.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base --permutations 2 examples/primitive/rank.json
-```
-
-Richiesta (lo stato è il ticket di [examples/ticket_it.json](../examples/ticket_it.json)):
-
-```json
-{"state": "Buongiorno, sono tre giorni che i pagamenti ai nostri fornitori falliscono ...",
- "questions": {"priorita": {"type": "rank", "instructions": "Quale azione va fatta per prima?",
-   "criteria": {"riparare_pagamenti": "Risolvere il problema dei pagamenti",
-                "offrire_sconto": "Offrire uno sconto commerciale",
-                "inviare_newsletter": "Inviare la newsletter mensile"}}}}
-```
-
-Risposta:
-
-```json
-"priorita": {"type": "rank",
-  "ranking": ["riparare_pagamenti", "inviare_newsletter", "offrire_sconto"],
-  "probabilities": {"riparare_pagamenti": 0.9948, "offrire_sconto": 0.0023, "inviare_newsletter": 0.0029},
-  "confidence": 0.9922}
-```
-
-**Come si legge.** `ranking` è l'ordine dalla più alla meno indicata. Le probabilità dicono quanto è netta la prima scelta; qui le altre due sono quasi a pari merito, quindi il loro ordine relativo non è informativo.
+> **`rank` non c'è più** (29/09/2026). Per ordinare delle opzioni si usa `choice`: restituisce già la probabilità di ognuna, e ordinarle è una riga di codice. La domanda "Quale azione va fatta per prima?" di [examples/primitive_it.json](../examples/primitive_it.json) ora è una `choice`.
 
 ### `number`: stimare una quantità
 
@@ -175,27 +158,25 @@ Gli intervalli vanno scelti in base alla precisione che serve: più sono stretti
 - **Adatto a:** estrarre un nome, un giorno, una città, un colore, una lingua.
 - **Non adatto a:** risposte di più parole o concetti astratti. Per quelli conviene `choice` con le opzioni.
 
-### `embed`: vettore semantico dello stato
+### Vettore semantico dello stato: `POST /v1/embed`
+
+Dal 29/09/2026 non si chiede più dentro `/v1/systemone` (`"embed": true`), ma con una chiamata a parte al server del modello:
 
 ```bash
-.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base examples/primitive/embed.json
+curl -s localhost:8100/v1/embed -H 'Content-Type: application/json' \
+  -d '{"state": "Buongiorno, sono tre giorni che i pagamenti ..."}'
 ```
 
 ```json
-{"state": "Buongiorno, sono tre giorni che i pagamenti ...", "embed": true}
-```
-
-```json
-"answers": {},
-"state": {"embedding": [0.0239, -0.0038, -0.0358, -0.0114, ...], "embedding_dim": 2048}
+{"embedding": [0.0239, -0.0038, -0.0358, -0.0114, ...], "embedding_dim": 2048, "input_tokens": ..., "latency_ms": ...}
 ```
 
 **Come si usa:**
-- `questions` può mancare se si chiede solo `embed`;
+- lo stato può contenere immagini (in base64), con `image_max_side` facoltativo;
 - il vettore è normalizzato: la similarità fra due stati è il prodotto scalare;
 - per un archivio di casi, conviene prima sottrarre la media dei vettori (anisotropia).
 
-La memoria dei casi usa proprio questo vettore ([06-memoria.md](06-memoria.md)).
+La memoria dei casi usa proprio questo vettore ([06-memoria.md](06-memoria.md)). Da Python lo stesso vettore si ottiene con `scorer.analyze_state(stato)`.
 
 ### Da Python
 
@@ -205,10 +186,10 @@ from egeria.calibration import load_temperatures
 from egeria.scorer import DecisionScorer
 
 scorer = DecisionScorer("Qwen/Qwen3.5-2B-Base")  # device="cpu", dtype="float32" per il CPU
-temperatures, exit_temperatures = load_temperatures("runs/Qwen3.5-2B-Base/temperature.json")
+temperatures = load_temperatures("runs/Qwen3.5-2B-Base/temperature.json")
 body = json.load(open("examples/primitive_it.json"))
 response = scorer.decide(body, permutations=2, temperatures=temperatures)
-print(response["answers"]["priorita"]["ranking"], response["answers"]["giorni"]["value"])
+print(response["answers"]["priorita"]["choice"], response["answers"]["giorni"]["value"])
 ```
 
-Le temperature si applicano per readout: `rank` usa quella delle `choice`, `number` quella delle `score`. `open` non è calibrata.
+Le temperature si applicano per readout: `number` usa quella delle `score`. `open` non è calibrata.

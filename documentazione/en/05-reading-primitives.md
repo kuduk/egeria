@@ -2,7 +2,13 @@
 
 # Reading primitives beyond noul, choice and score
 
-> Status: `rank`, `number`, `open` and `embed` are implemented and **verified** (§4). **Removed** because they did not pass the test: `multi` (yes-bias; it will come back with F1 training) and `surprise` (AUROC 0.50). The ones that need training (`span`, `locate`, `value`, `tags`, `why`) are still to be done. Usage examples in §5.
+> Status: `number` and `open` are implemented and **verified** (§4), plus the semantic vector of the state, which today is requested only through `POST /v1/embed` on the model server.
+>
+> **Removed:**
+> - on 29/09/2026, to simplify: `rank`, which is a `choice` with the options sorted by probability, and `embed` inside `/v1/systemone`;
+> - earlier, because they did not pass the test: `multi` (yes-bias) and `surprise` (AUROC 0.50). On 29/09/2026 `multi` was also dropped as a training goal: it is equivalent to N Yes/No questions.
+>
+> The ones that need training (`span`, `locate`, `value`, `tags`, `why`) are still to be done. Usage examples in §5.
 
 ## 1. What can be read in a single forward pass
 
@@ -18,16 +24,18 @@ From these, other primitives can be derived without generating text.
 | Primitive | Returns | How it is read | Example |
 |---|---|---|---|
 | `multi` (removed, see §4) | an independent probability for each option | one `noul` per option, in the same batch | issues present in a ticket |
-| `rank` | full ranking with probabilities | distribution of the `choice` | reordering documents or actions |
+| `rank` (removed on 29/09/2026) | full ranking with probabilities | distribution of the `choice`: just sort it | reordering documents or actions |
 | `number` (binned) | expected value + interval | `score` with numeric bins as levels | how many people are in the image |
 | `open` | top-k over the whole vocabulary | softmax over the full lm_head at the last position | color of the car, without listing the options (single-token answers) |
-| `embed` | semantic vector of the state | final hidden state (like Qwen3-Embedding) | similar-case search, deduplication, scene change in video |
-| `recall` | the most similar memories (with decisions and notes) | memory search with the state's `embed` | "cosa ti ricorda?" ("what does it remind you of?") ([06-memory.md](06-memory.md) §7) |
-| `known` (not kept) | already seen / similar / new | thresholds on similarity with the memory | "è qualcosa che hai in memoria?" ("is it something you have in memory?") ([06-memory.md](06-memory.md) §7) |
+| state vector (`/v1/embed`) | semantic vector of the state | final hidden state (like Qwen3-Embedding) | similar-case search, deduplication, scene change in video |
+| similar memories (`memory.recall`) | the most similar memories (with decisions and notes) | memory search with the state vector | "cosa ti ricorda?" ("what does it remind you of?") ([06-memory.md](06-memory.md) §7). As a question type, `recall` was removed on 29/09/2026 |
+| `known` (not kept, abandoned on 29/09/2026) | already seen / similar / new | thresholds on similarity with the memory | "è qualcosa che hai in memoria?" ("is it something you have in memory?") ([06-memory.md](06-memory.md) §7) |
 | `surprise` (removed, see §4) | how unexpected the state is | the model's log-probability of the state tokens | anomalies in emails or frames |
-| uncertainty | entropy, margin, exit depth, agreement across permutations | partly already computed (`depth`, `status`) | difficulty of the decision |
+| uncertainty | entropy, margin, agreement across permutations | partly already computed (`status` against `min_confidence`) | difficulty of the decision |
 
 ### With a trained head
+
+`span`, `locate` and `why` are also on the roadmap in a **zero-shot** version, without a trained head (§3 and [02-implications-and-proposal.md](02-implications-and-proposal.md) §6).
 
 | Primitive | Returns | How | Example |
 |---|---|---|---|
@@ -45,38 +53,38 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) has **only** `noul`, `choice` and `score`, 
 |---|---|---|---|---|
 | `noul`, `choice`, `score` | ✓ | ✓ | ✓ | ✓ |
 | Per-question threshold / abstention | ✗ | act/escalate head not working | ✓ `min_confidence` + `status` | ✓ |
-| Dynamic depth | ✗ | ✗ | ✓ | ✓ |
-| Image state | ✗ | ✗ | prototype | ✓ |
-| `multi`, `rank`, `number`, `open` | ✗ (only the expected value of `score`) | ✗ | – | ✓ zero-shot |
-| `embed`, `surprise` | ✗ | ✗ | – | ✓ zero-shot |
+| Dynamic depth | ✗ | ✗ | removed on 29/09/2026 (real zero-shot gain 0.5–4%) | – |
+| Image state | ✗ | ✗ | ✓ | ✓ |
+| `number`, `open` | ✗ (only the expected value of `score`) | ✗ | ✓ zero-shot | ✓ |
+| State vector and memory | ✗ | ✗ | ✓ (`/v1/embed`, `memory`) | ✓ |
 | `span`, `locate`, `value`, `tags` | ✗ | ✗ | – | with training |
 | Customer fine-tuning | ✗ | ✓ | ✓ | ✓ |
 | Local execution | ✗ (cloud) | ✓ | ✓ | ✓ |
 
 ## 3. Proposed priorities
 
-1. **`embed` for real-time video.** The frame vector comes for free in the same pass: the questions are asked only when the scene changes.
-2. **`locate` on images.** "Yes, here" is much more useful than "yes".
-3. **`span`** to extract values from documents without generation.
-4. **`open`**: cheap and zero-shot. (`multi` postponed to F1.)
+1. **The state vector for real-time video.** The frame vector comes for free in the same pass: the questions are asked only when the scene changes.
+2. **`span`** (on the roadmap, right after F0.5): values copied verbatim from the state, without training. The `open` completion accepts only tokens that continue a piece present in the state, so the answer cannot be made up.
+3. **`locate`** (on the roadmap, together with the left/right investigation): "yes, here" is much more useful than "yes". Zero-shot, from the coordinates that Qwen vision models can produce.
+4. **`why`** (on the roadmap, together with the operator interface): the sentences of the state that drove the decision, found by removing one at a time.
+5. **`open`**: cheap and zero-shot. (`multi` abandoned on 29/09/2026: use N Yes/No questions.)
 
 ## 4. Implementation and verification (zero-shot)
 
 | Type | How it is built | Response |
 |---|---|---|
-| `rank` | letter readout, like `choice` | `ranking`, `probabilities`, `confidence` |
 | `number` | ordinal readout like `score`, over the bins; `null` = open end | `value` (expected value over the midpoints), `interval` (10–90%, piecewise uniform), `range`, `probabilities`, `unit` |
 | `open` | softmax over the whole vocabulary (special tokens excluded). Candidates are completed up to the word boundary: one prefill + ≤4 greedy tokens, with a duplicated cache | `answer`, `candidates` with `p` (probability of the first token), `confidence` |
-| `embed` | mean of the final hidden states over the state tokens, normalized | `state.embedding`, `state.embedding_dim` |
+| state vector (`POST /v1/embed`) | mean of the final hidden states over the state tokens, normalized | `embedding`, `embedding_dim` |
 
 **Verification** ([scripts/verifica_primitive.py](../../scripts/verifica_primitive.py), 2B-Base, thresholds fixed before seeing the results). A primitive is kept only if it passes its threshold.
 
 | Primitive | Test | Threshold | Result | Outcome |
 |---|---|---|---|---|
-| `rank` | 4 situations with an obvious priority action | ≥ 3/4 | **4/4** | kept |
+| `rank` | 4 situations with an obvious priority action | ≥ 3/4 | **4/4** | kept, then removed on 29/09/2026: the same test is now done with `choice` |
 | `number` | 5 quantities written in the text (days, people, euros, kg, minutes) | ≥ 4/5 within the bin | **5/5** (15.4 people, €1,303, 7.7 kg, 39 min) | kept |
 | `open` | 6 one-word answers (day, language, city, color, month, surname) | ≥ 5/6 | **6/6** | kept |
-| `embed` | retrieval of cases with the same decisions (kNN on typed-decisions) | better than the Prior | **0.564** vs 0.478, on par with Qwen3-Embedding-0.6B | kept |
+| `embed` | retrieval of cases with the same decisions (kNN on typed-decisions) | better than the Prior | **0.564** vs 0.478, on par with Qwen3-Embedding-0.6B | kept (now through `/v1/embed` and the memory) |
 | `surprise` | 6 normal texts vs 6 anomalous ones | AUROC ≥ 0.85 | **0.50** | **removed** |
 | `multi` | tickets and photos | – | 0.8B: "yes" to almost everything (yes-bias, not fixable with temperature) | **removed** |
 
@@ -87,38 +95,13 @@ Jev (`jev-1.13.0`, docs.typesafe.ai) has **only** `noul`, `choice` and `score`, 
 
 **Known limits of the primitives we kept:**
 - `open` answers with a single "word" or value. The probability refers to the first token; the completion continues up to the first space (within 16 tokens), so dates, amounts and codes come out whole (a full date in "dd.mm.yyyy" format, the amount "14,21"). It also works with images ([04-image-states.md](04-image-states.md) §7).
-- `embed` costs one extra pass over the state.
+- the state vector costs one extra pass over the state.
 
 ## 5. Usage examples
 
 All the examples are in [examples/primitive/](../../examples/primitive/). The outputs below are **real** (Qwen3.5-2B-Base, 2 permutations, RTX 4070 Laptop). A single request can mix questions of different types ([examples/primitive_it.json](../../examples/primitive_it.json)).
 
-### `rank`: ordering the options
-
-```bash
-.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base --permutations 2 examples/primitive/rank.json
-```
-
-Request (the state is the ticket from [examples/ticket_it.json](../../examples/ticket_it.json)):
-
-```json
-{"state": "Buongiorno, sono tre giorni che i pagamenti ai nostri fornitori falliscono ...",
- "questions": {"priorita": {"type": "rank", "instructions": "Quale azione va fatta per prima?",
-   "criteria": {"riparare_pagamenti": "Risolvere il problema dei pagamenti",
-                "offrire_sconto": "Offrire uno sconto commerciale",
-                "inviare_newsletter": "Inviare la newsletter mensile"}}}}
-```
-
-Response:
-
-```json
-"priorita": {"type": "rank",
-  "ranking": ["riparare_pagamenti", "inviare_newsletter", "offrire_sconto"],
-  "probabilities": {"riparare_pagamenti": 0.9948, "offrire_sconto": 0.0023, "inviare_newsletter": 0.0029},
-  "confidence": 0.9922}
-```
-
-**How to read it.** `ranking` is the order from the most to the least appropriate. The probabilities tell how clear-cut the first choice is; here the other two are almost tied, so their relative order carries no information.
+> **`rank` is gone** (29/09/2026). To order options, use `choice`: it already returns the probability of each one, and sorting them is one line of code. The question "Quale azione va fatta per prima?" ("Which action should be taken first?") in [examples/primitive_it.json](../../examples/primitive_it.json) is now a `choice`.
 
 ### `number`: estimating a quantity
 
@@ -175,27 +158,25 @@ Choose the bins according to the precision you need: the narrower they are, the 
 - **Good for:** extracting a name, a day, a city, a color, a language.
 - **Not suited to:** multi-word answers or abstract concepts. For those, use `choice` with the options.
 
-### `embed`: semantic vector of the state
+### Semantic vector of the state: `POST /v1/embed`
+
+Since 29/09/2026 it is no longer requested inside `/v1/systemone` (`"embed": true`), but with a separate call to the model server:
 
 ```bash
-.venv/bin/egeria decide --model Qwen/Qwen3.5-2B-Base examples/primitive/embed.json
+curl -s localhost:8100/v1/embed -H 'Content-Type: application/json' \
+  -d '{"state": "Buongiorno, sono tre giorni che i pagamenti ..."}'
 ```
 
 ```json
-{"state": "Buongiorno, sono tre giorni che i pagamenti ...", "embed": true}
-```
-
-```json
-"answers": {},
-"state": {"embedding": [0.0239, -0.0038, -0.0358, -0.0114, ...], "embedding_dim": 2048}
+{"embedding": [0.0239, -0.0038, -0.0358, -0.0114, ...], "embedding_dim": 2048, "input_tokens": ..., "latency_ms": ...}
 ```
 
 **How to use it:**
-- `questions` can be omitted if only `embed` is requested;
+- the state can contain images (in base64), with optional `image_max_side`;
 - the vector is normalized: the similarity between two states is their dot product;
 - for a case archive, subtract the mean vector first (anisotropy).
 
-The case memory uses exactly this vector ([06-memory.md](06-memory.md)).
+The case memory uses exactly this vector ([06-memory.md](06-memory.md)). From Python, the same vector is obtained with `scorer.analyze_state(stato)`.
 
 ### From Python
 
@@ -205,10 +186,10 @@ from egeria.calibration import load_temperatures
 from egeria.scorer import DecisionScorer
 
 scorer = DecisionScorer("Qwen/Qwen3.5-2B-Base")  # device="cpu", dtype="float32" for CPU
-temperatures, exit_temperatures = load_temperatures("runs/Qwen3.5-2B-Base/temperature.json")
+temperatures = load_temperatures("runs/Qwen3.5-2B-Base/temperature.json")
 body = json.load(open("examples/primitive_it.json"))
 response = scorer.decide(body, permutations=2, temperatures=temperatures)
-print(response["answers"]["priorita"]["ranking"], response["answers"]["giorni"]["value"])
+print(response["answers"]["priorita"]["choice"], response["answers"]["giorni"]["value"])
 ```
 
-Temperatures are applied per readout: `rank` uses the one for `choice`, `number` the one for `score`. `open` is not calibrated.
+Temperatures are applied per readout: `number` uses the one for `score`. `open` is not calibrated.
