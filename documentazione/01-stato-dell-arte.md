@@ -2,7 +2,7 @@
 
 # Stato dell'arte: modelli decisionali semantici "System 1"
 
-> Ricerca aggiornata al **26 settembre 2026**. La categoria è nata a metà settembre 2026: quasi tutti i numeri sono dichiarati dai vendor o da leaderboard della community vecchie di pochi giorni.
+> Ricerca aggiornata al **26 settembre 2026**; CLM (§5.5) è stato aggiunto il 29 settembre. La categoria è nata a metà settembre 2026: quasi tutti i numeri sono dichiarati dai vendor o da leaderboard della community vecchie di pochi giorni.
 >
 > Etichette usate:
 > - **[vendor]**: dichiarato da chi ha fatto il modello.
@@ -44,6 +44,9 @@
   - SemIf.
 
   La ricetta vincente oggi è: Qwen3.5 **Base** + LoRA, readout dei logit delle opzioni (lettera o pointer head), softmax ristretta, distillazione soft da un teacher Qwen più grande, e una temperatura fittata.
+- **CLM** (Stanford + NVIDIA, 23/09/2026) è aperto e sceglie un'altra strada: un **dual encoder contrastivo**, cioè Qwen3-8B congelato più due piccole teste.
+  - È molto veloce e non ha bias di posizione.
+  - Nei suoi stessi test, però, concorda con la risposta giusta molto meno di Jev (§5.5).
 - **Qwen 3.8 non ha modelli piccoli né checkpoint Base.** Esistono solo 27B denso, 2.4T MoE e Flash-Next (125B MoE). Il 27B è realistico come **teacher**, oppure come student solo con una GPU da 80 GB.
 - **Architettura ibrida.** Qwen 3.5/3.6/3.8 usa un'architettura ibrida (75% Gated DeltaNet lineare). Queste parti **non si possono rendere bidirezionali** cambiando la maschera, e le **tree attention mask non funzionano**. Servono tecniche specifiche, come il "prefix-fork" dello stato.
 - **Gli altri paradigmi "semantici"** (JEPA, Large Concept Models, CALM, ragionamento latente) sono interessanti ma **non servono** per un modello decisionale. Al massimo una loss ausiliaria LLM-JEPA è un esperimento a basso costo.
@@ -327,7 +330,7 @@ La distanza da 0.766 è ciò che deve colmare la fase F1.
 | **Calibrazione fragile.** Solo temperatura, senza spostamento. Fittata nel dominio del training (400 esempi). La fascia `choice:11+` vale 0.10, cioè il limite inferiore del fit: un fit degenerato. Fuori dominio la confidenza non regge (khmer: accuratezza 0 con confidenza 0.95) | Temperatura più spostamento per fascia; scartare i fit che toccano i limiti; misurare la calibrazione **fuori** dominio; soglie con garanzia (conformal risk control) |
 | **La testa "agisci o passa la mano" non è addestrata** | O la si addestra con un obiettivo (la risposta era giusta?), o si usa la confidenza con soglie garantite |
 | **Il budget di token per le opzioni è fisso:** 48 token per opzione, ~20 opzioni al massimo, stato a 512 token | Nel nostro formato le opzioni seguono lo stato senza un budget fisso; il limite è quello delle 26 lettere, superabile con la selezione preliminare via `embed` |
-| **Solo scegliere:** non legge valori (date, importi), non vede immagini | Già coperto da `open`, `number` e dagli stati con immagini |
+| **Solo scegliere:** non legge valori (date, importi), non vede immagini | Già coperto da `short_answer`, `estimate` e dagli stati con immagini |
 
 ---
 
@@ -374,6 +377,49 @@ La distanza da 0.766 è ciò che deve colmare la fase F1.
 1. **Un Qwen di 4–9B con LoRA e readout dei logit raggiunge Jev** sui benchmark della community.
 2. **Il gap principale è la conoscenza del backbone**, non l'architettura della testa. decider ha 0.51 contro 0.69 di Jev sull'area "knowledge" del Decision Index.
 3. **Su Qwen3.8-27B esistono già due baseline aperte**, Kev-27B e Open-Jev-27B. Per essere utile, un nuovo modello deve **differenziarsi**: per esempio su lingua, astensione, invarianza all'ordine o dominio.
+
+### 5.5 CLM (Stanford + NVIDIA, 23/09/2026): un dual encoder contrastivo
+
+Codice letto il 29/09/2026 (commit bb42c6c), insieme alle schede Hugging Face.
+
+- **Cos'è.** CLM-8B (*Contrastive Language Model*): J. Kwok, A. Mirhoseini, C. Ré, M. Pavone e altri, Stanford con NVIDIA. È Apache-2.0 (pacchetto `contrastive-lm`). Usa lo stesso formato di Jev: `POST /v1/systemone` con `noul`, `choice` e `score` (verificato nel codice). In più ha un `rank` su candidati liberi.
+- **Il modello.**
+  - Encoder: **Qwen3-8B congelato**. Non è un Qwen3.5: niente DeltaNet, niente immagini. È servito da vLLM in modalità *pooling* e usa l'embedding dell'**ultimo token** (4096 dimensioni). Gli stati sono troncati a 2048 token.
+  - Sopra ci sono **due teste MLP**, una per lo stato e una per l'azione: 4096 → 1536 → 1536 → 512, con LayerNorm. Insieme fanno circa 19M di parametri (75 MB in fp32) e sono l'unica parte allenata.
+  - Punteggio: `exp(logit_scale) · cos(testa_stato(s), testa_azione(c))`, poi una softmax sui candidati della domanda.
+- **Come legge le domande.**
+  - Lo stato, seguito dalle `instructions`, va nella testa stato.
+  - Ogni opzione è un testo a sé nella testa azione: la sua descrizione, oppure la chiave.
+  - Per `noul` i due candidati sono `true: Yes. This is true: {domanda}` e `false: No. This is false: {domanda}`.
+  - Non c'è calibrazione, solo una temperatura passata dal chiamante.
+- **Training** [vendor], in tre fasi:
+  1. 60M coppie domanda-risposta Nemotron, con InfoNCE bidirezionale.
+  2. 30M hard negative sintetici generati con Gemini 2.5 Flash-Lite. La top-1 su 10 negativi passa da 52.1% a 69.2%. Usati fin dall'inizio, invece, gli hard negative si fermano a 62.4%.
+  3. 1M traiettorie di agenti (ADP, Endless-Terminals, LiteCoder). Ogni passo è una coppia (contesto, azione presa). Il mix contiene il 40% di replay di Nemotron: senza replay, la top-1 su Nemotron scende da 69% a 56.2%.
+- **Velocità.** Le azioni si codificano una volta sola e restano in cache. Con candidati ripetuti, una domanda costa un embedding dello stato più un prodotto scalare. Su T-Rex: 2.6 ms di modello e 16.5 ms p50 lato client. Jev, via API, ne impiega 150.
+
+**Come gestisce i benchmark di agenti (dal codice e dai file pubblicati):**
+
+| Benchmark | Cosa fa davvero | Nota critica |
+|---|---|---|
+| T-Rex (gioco del dinosauro di Chrome, 5 percorsi × 60 s) | Un pianificatore fisico calcola quali azioni sono sicure e lo scrive nelle opzioni: `Safe. … Best.`, `Safe. …`, `Unsafe. … Collision.`. Al modello resta da leggere l'etichetta. Uno "scudo" sostituisce le risposte non sicure | Sopravvivono entrambi 5/5, ma CLM concorda col pianificatore solo nel **65.8%** delle decisioni (Jev 98.7%). Lo scudo interviene **4.883 volte** per CLM e 28 per Jev: il pari lo fa lo scudo. Il test misura la latenza, non la decisione |
+| DeepSWE (verificatore best-of-4) | Una testa **allenata apposta** su 59 task (22.576 coppie prese da traiettorie riuscite). Ogni passo riceve il coseno stato-azione e la traiettoria vale la media degli ultimi 12 passi. Si sceglie la traiettoria con il valore più alto | 38 task held-out, di cui solo **13** decidibili. A caso: 28/38 (73.7%). CLM: **31/38** (81.6%). Oracolo: 34/38. Sono **3 task** in più del caso. Jev invece è usato zero-shot. Il dataset di valutazione citato nel README non risulta pubblico (29/09/2026) |
+| Terminal-Bench 2.1 (87.6%) | Stesso schema, con candidati generati da Fable 5 | Testa e dati non pubblicati |
+| BFCL v4, WikiRacing, Super Mario | Solo nel grafico del README. BFCL 95.2% (Jev 99.2%), WikiRacing 26/30 (Jev 30/30) [vendor] | Nessun codice nel repository |
+
+La guida al fine-tuning (`docs/FINETUNING.md`) fa girare un agente che modifica il trainer in ciclo e tiene una modifica se migliora il tasso best-of-N "held-out". Così il set di test diventa il criterio di selezione. Non è detto che i numeri pubblicati vengano da quel ciclo; se sì, sono ottimisti.
+
+**Cosa ci serve:**
+1. **Invarianza all'ordine per costruzione.** Ogni opzione è codificata da sola, quindi il bias di posizione misurato in [09](09-controlli-senza-etichette.md) non esiste. Il prezzo è che stato e opzioni non si incontrano mai dentro il modello. Le negazioni e le etichette quasi uguali (`Safe`/`Unsafe`) diventano difficili, come mostra il 65.8% su T-Rex.
+2. **Molte opzioni a basso costo.** Il nostro readout con le lettere si ferma a 26 opzioni; CLM ne tiene migliaia in cache (WikiRacing). Se servirà scegliere tra molti candidati, una testa contrastiva sopra il nostro `/v1/embed` è la strada più economica.
+3. **Un'alternativa alla LoRA per F1.** Le teste si allenano su embedding pre-calcolati da un backbone congelato: richiede minuti, non ore. Si possono provare come baseline del primo task sulle immagini, da confrontare con la LoRA.
+4. **Una ricetta dati per F2.** Prima dati ampi, poi gli hard negative (+7 punti rispetto a usarli da subito), più un 40% di replay per non dimenticare. Vale anche per le nostre LoRA.
+5. **Cose da non copiare:**
+   - confronti tra teste allenate sul benchmark e Jev zero-shot;
+   - benchmark con la risposta scritta nelle opzioni;
+   - selezione fatta sul set di test.
+
+**Hardware.** Qwen3-8B in bf16 occupa circa 16 GB. Sulla nostra GPU da 8 GB andrebbe quantizzato, ma la testa è stata allenata su embedding bf16 e la quantizzazione li sposta: va verificato. È annunciato un CLM-35B-A3B multimodale per inizio ottobre 2026 [vendor, da articoli].
 
 ---
 

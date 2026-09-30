@@ -69,6 +69,23 @@ def coverage_at_error(confidences, correct, max_error: float = 0.05) -> float:
     return float((ok.max() + 1) / len(order)) if len(ok) else 0.0
 
 
+def threshold_split(records: list[dict], min_confidence: float) -> dict:
+    """Esiti con una soglia `min_confidence`, come nel server: quota di risposte incerte e accuratezza
+    delle decise e delle incerte. La confidenza è quella di Jev (corretta per il caso, `decision_confidence`)."""
+    from .confidence import decision_confidence
+
+    decided = [int(np.argmax(r["probs"])) == int(r["label"]) for r in records
+               if decision_confidence(r["type"], r["probs"]) >= min_confidence]
+    uncertain = [int(np.argmax(r["probs"])) == int(r["label"]) for r in records
+                 if decision_confidence(r["type"], r["probs"]) < min_confidence]
+    return {
+        "min_confidence": min_confidence,
+        "uncertain_share": len(uncertain) / max(1, len(records)),
+        "decided_accuracy": float(np.mean(decided)) if decided else float("nan"),
+        "uncertain_accuracy": float(np.mean(uncertain)) if uncertain else float("nan"),
+    }
+
+
 def summarize(records: list[dict]) -> dict:
     if not records:
         return {}

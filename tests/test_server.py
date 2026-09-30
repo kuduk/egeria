@@ -29,12 +29,16 @@ class FakeScorer:
     def __init__(self):
         self.calls = []
 
-    def decide(self, body, permutations=1, temperatures=None, default_min_confidence=None, memory=None):
-        self.calls.append({"body": body, "permutations": permutations, "temperatures": temperatures})
+    def decide(self, body, permutations=1, temperatures=None, default_min_confidence=None, memory=None,
+               yes_correction=True):
+        self.calls.append({"body": body, "permutations": permutations, "temperatures": temperatures,
+                           "yes_correction": yes_correction})
         state, questions = parse_request(body, default_min_confidence)
         answers = {}
         for q in questions:
             p = softmax(np.linspace(1.0, 0.0, len(q.options)) * (3 if "sicuro" in str(state) else 0.3))
+            if "varia" in str(state):  # distorsione verso la prima opzione, ma la risposta cambia da caso a caso
+                p = softmax(np.eye(len(q.options))[len(state) % len(q.options)] + np.linspace(1.5, 0.0, len(q.options)))
             result = answer(q, p)
             if q.min_confidence is not None:
                 result["status"] = "decided" if p.max() - 1 / len(p) > q.min_confidence / 2 else "uncertain"
@@ -139,8 +143,12 @@ def test_memory_is_readable(client):
     case = client.post("/api/cases", json={"request": request}).json()
     client.post(f"/api/cases/{case['id']}/review", json={"decisions": {"reparto": "tecnico", "urgente": "true"}})
     item = client.get("/api/memory").json()["items"][0]
-    assert {"question": "È urgente?", "answer": "Sì"} in item["readable"]
-    assert {"question": "Quale reparto?", "answer": "tecnico"} in item["readable"]
+    # con la decisione grezza ("value"), per mostrare Sì/No tradotti nell'interfaccia in inglese
+    assert {"question": "È urgente?", "answer": "Sì", "value": "true"} in item["readable"]
+    assert {"question": "Quale reparto?", "answer": "tecnico", "value": "tecnico"} in item["readable"]
+    # ricordo senza etichette salvate: sì/no generici, sempre con il valore grezzo
+    bare = client.post("/api/memory", json={"state": "altro ticket", "decisions": {"urgente": "false"}}).json()
+    assert bare["readable"] == [{"question": "urgente", "answer": "No", "value": "false"}]
     listed = client.get("/api/cases?view=tutti").json()["cases"][0]
     assert listed["text"] == "ticket dubbio" and listed["questions"] == 2 and listed["thumb"] is None and listed["images"] == 0
 
@@ -165,23 +173,27 @@ def test_model_server_is_stateless_and_guarded():
     auth = {"Authorization": "Bearer segreto"}
     assert app.post("/v1/systemone", json=body, headers={"Authorization": "Bearer altro"}).status_code == 401
     assert app.post("/v1/systemone", json=body, headers=auth).json()["answers"]["reparto"]["choice"] == "pagamenti"
-    assert scorer.calls[-1]["temperatures"] == {"choice": 2.0} and scorer.calls[-1]["permutations"] == 2
+    assert scorer.calls[-1]["temperatures"] == {"choice": 2.0} and scorer.calls[-1]["permutations"] == "auto"
+    assert scorer.calls[-1]["yes_correction"] is True
     # la memoria non sta qui; i percorsi locali sono rifiutati; permutazioni e calibrazione per richiesta
     assert app.post("/v1/systemone", json={**body, "memory": {"recall": 3}}, headers=auth).status_code == 422
     image = {"state": [{"type": "image", "path": "/etc/hosts"}], "questions": QUESTIONS}
     assert app.post("/v1/systemone", json=image, headers=auth).status_code == 422
     assert app.post("/v1/embed", json={"state": image["state"]}, headers=auth).status_code == 422
-    assert app.post("/v1/systemone", json={**body, "permutations": 0}, headers=auth).status_code == 422
-    app.post("/v1/systemone", json={**body, "permutations": 3, "calibrated": False}, headers=auth)
+    for wrong in ({"permutations": 0}, {"permutations": "tutte"}, {"permutations": True}, {"yes_correction": "no"}):
+        assert app.post("/v1/systemone", json={**body, **wrong}, headers=auth).status_code == 422
+    app.post("/v1/systemone", json={**body, "permutations": 3, "calibrated": False, "yes_correction": False}, headers=auth)
     assert scorer.calls[-1]["temperatures"] == {} and scorer.calls[-1]["permutations"] == 3
-    assert "permutations" not in scorer.calls[-1]["body"]
+    assert scorer.calls[-1]["yes_correction"] is False
+    assert not {"permutations", "calibrated", "yes_correction"} & set(scorer.calls[-1]["body"])
     # con immagini la calibrazione non si applica mai
     picture = [{"type": "image", "base64": image_data_url().partition(",")[2]}]
     app.post("/v1/systemone", json={"state": picture, "questions": QUESTIONS}, headers=auth)
     assert scorer.calls[-1]["temperatures"] == {} and scorer.calls[-1]["body"]["image_max_side"] == 448
     embedded = app.post("/v1/embed", json={"state": "ciao"}, headers=auth).json()
     assert embedded["embedding_dim"] == 16 and "latency_ms" in embedded
-    assert app.get("/v1/info", headers=auth).json()["calibrated"] is True
+    info = app.get("/v1/info", headers=auth).json()
+    assert info["calibrated"] is True and info["permutations"] == "auto" and info["yes_correction"] is True
 
 
 def test_client_token_and_unreachable_model(tmp_path, monkeypatch):
@@ -256,3 +268,44 @@ def test_web_sends_images_inline(client, scorer, tmp_path):
     assert case["request"]["state"][1] == {"type": "image", "path": media["path"]}  # lo storico tiene il percorso
     outside = [{"type": "image", "path": "/etc/hosts"}]
     assert client.post("/v1/systemone", json={"state": outside, "questions": QUESTIONS}).status_code == 422
+
+
+def test_calibration_on_history(client, scorer):
+    """Calibrazione sullo storico: niente sotto i 50 casi, poi la distorsione della domanda si cancella."""
+    import egeria.server as server
+
+    question = {"type": "choice", "instructions": "Quale reparto?", "batch_calibration": True,
+                "criteria": {"pagamenti": None, "tecnico": None, "vendite": None}}
+    request = {"state": "varia", "questions": {"reparto": question}, "memory": {"recall": 0}}
+    first = client.post("/api/cases", json={"request": request}).json()
+    assert first["response"]["answers"]["reparto"]["batch_calibration"] == {"cases": 0, "min_cases": 50, "applied": False}
+    assert "batch_calibration" not in scorer.calls[-1]["body"]["questions"]["reparto"]  # il modello non lo vede
+    for n in range(server.BATCH_MIN_CASES):
+        client.post("/api/cases", json={"request": {**request, "state": "varia" + "x" * n}})
+    # una domanda diversa (altro testo) non conta nello storico di questa
+    other = {"reparto": {**question, "instructions": "Quale ufficio?"}}
+    assert client.post("/api/cases", json={"request": {**request, "questions": other}}).json()[
+        "response"]["answers"]["reparto"]["batch_calibration"]["cases"] == 0
+    result = client.post("/api/cases", json={"request": {**request, "state": "varia" + "x" * 9}}).json()
+    answer = result["response"]["answers"]["reparto"]
+    info = answer["batch_calibration"]
+    assert info["applied"] is True and info["cases"] == server.BATCH_MIN_CASES + 1
+    # grezza: vince la prima opzione per la distorsione; calibrata: vince quella del caso
+    assert max(info["raw"], key=info["raw"].get) == "pagamenti" and answer["choice"] == "vendite"
+    assert abs(sum(answer["probabilities"].values()) - 1) < 1e-6
+    # nello storico conta la distribuzione grezza, non quella già calibrata
+    assert server.raw_distribution(answer) == info["raw"]
+    assert server.raw_distribution({"type": "noul", "noul": 0.8}) == {"true": 0.8, "false": 1 - 0.8}
+    # campo non valido o tipo non ammesso
+    wrong = {"reparto": {**question, "batch_calibration": "sì"}}
+    assert client.post("/v1/systemone", json={"state": "x", "questions": wrong}).status_code == 422
+    words = {"parola": {"type": "short_answer", "instructions": "Che giorno?", "batch_calibration": True}}
+    assert client.post("/v1/systemone", json={"state": "x", "questions": words}).status_code == 422
+
+
+def test_monitor_never_uses_history(client, scorer):
+    question = {"type": "noul", "instructions": "C'è fumo?", "batch_calibration": True}
+    response = client.post("/api/monitor/frame", json={"frame": image_data_url(), "questions": {"fumo": question}})
+    assert response.status_code == 200
+    assert "batch_calibration" not in response.json()["answers"]["fumo"]
+    assert "batch_calibration" not in scorer.calls[-1]["body"]["questions"]["fumo"]

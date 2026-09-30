@@ -8,6 +8,9 @@ Questo server non carica il modello e non importa torch: chiama il server del mo
 ricordi con il vettore dello stato (`/v1/embed`), manda al modello solo le domande, aggiunge alla
 risposta i ricordi simili e il voto dei ricordi. Le immagini indicate con un percorso vengono
 lette qui e inviate al modello in base64.
+
+Calibrazione sullo storico, facoltativa per domanda (`"batch_calibration": true`): la risposta si
+divide per la media delle risposte alla stessa domanda nei casi precedenti dello storico.
 """
 
 from __future__ import annotations
@@ -26,16 +29,63 @@ import numpy as np
 from .client import ModelUnavailable
 from .memory import (Memory, MemoryStore, apply_memory_context, describe_state, ensure_model, memory_context,
                      needs_embedding)
-from .schema import RequestError, is_multimodal, parse_request, parse_state
+from .schema import RequestError, canonical_type, is_multimodal, parse_question, parse_request, parse_state
 
 WEB_DIR = Path(__file__).parent / "web"
 PROJECT_ROOT = Path.cwd()
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 
+# Calibrazione sullo storico (calibrazione di lotto, Zhou et al. 2024): la risposta del modello si
+# divide per la media delle sue risposte alla stessa domanda nei casi precedenti, così la distorsione
+# propria di quella domanda si cancella. Si applica da BATCH_MIN_CASES casi (con meno, sulle domande a
+# scelta peggiora) e usa gli ultimi BATCH_WINDOW. Presume che le risposte vere siano varie: non va usata
+# per gli eventi rari, dove spingerebbe verso falsi allarmi, né dal vivo, dove i fotogrammi si somigliano.
+# Misure in documentazione/09-controlli-senza-etichette.md §8.
+BATCH_MIN_CASES = 50
+BATCH_WINDOW = 200
+BATCH_TYPES = ("noul", "choice", "score")
+
+
+def question_signature(question: dict) -> str:
+    """Identità di una domanda nello storico: tipo, testo e opzioni."""
+    return json.dumps([question.get("type"), question.get("instructions"), question.get("criteria")],
+                      ensure_ascii=False, sort_keys=True)
+
+
+def raw_distribution(result: dict) -> dict | None:
+    """Distribuzione del modello prima della calibrazione sullo storico."""
+    batch = result.get("batch_calibration") or {}
+    if batch.get("raw"):
+        return batch["raw"]
+    if result.get("type") == "noul":
+        return {"true": result["noul"], "false": 1 - result["noul"]}
+    return result.get("probabilities")
+
+
+def batch_questions(questions: dict) -> set:
+    """Id delle domande con la calibrazione sullo storico; errore se il campo non è valido."""
+    chosen = set()
+    for qid, question in questions.items():
+        if not isinstance(question, dict) or "batch_calibration" not in question:
+            continue
+        flag = question["batch_calibration"]
+        if not isinstance(flag, bool):
+            raise RequestError(f"domanda {qid!r}: batch_calibration deve essere true o false")
+        if flag and question.get("type") not in BATCH_TYPES:
+            raise RequestError(f"domanda {qid!r}: batch_calibration vale solo per noul, choice e score")
+        if flag:
+            chosen.add(qid)
+    return chosen
+
+
+def without_batch_flag(questions: dict) -> dict:
+    return {qid: {k: v for k, v in q.items() if k != "batch_calibration"} if isinstance(q, dict) else q
+            for qid, q in questions.items()}
+
 
 def answer_key(result: dict) -> str | None:
     """Risposta del modello come chiave di opzione, per confrontarla con il voto dei ricordi."""
-    kind = result.get("type")
+    kind = canonical_type(result.get("type"))  # lo storico può avere i nomi vecchi (number, open)
     if kind == "noul":
         return "true" if result["noul"] >= 0.5 else "false"
     if kind == "choice":
@@ -43,9 +93,9 @@ def answer_key(result: dict) -> str | None:
     if kind == "score":
         probabilities = result["probabilities"]
         return max(probabilities, key=probabilities.get)
-    if kind == "number":
+    if kind == "estimate":
         return result["range"]
-    if kind == "open":
+    if kind == "short_answer":
         return result["answer"]
     return None
 
@@ -125,6 +175,23 @@ class CaseStore:
             else:
                 counts["rivisti"] += n
         return counts
+
+    def history(self, signature: str, model: str | None, limit: int = BATCH_WINDOW) -> list[dict]:
+        """Distribuzioni grezze delle risposte passate alla stessa domanda con lo stesso modello, dalla più recente."""
+        found: list[dict] = []
+        with self.lock:
+            for request_text, response_text in self.db.execute("SELECT request, response FROM cases ORDER BY created DESC"):
+                response = json.loads(response_text)
+                if response.get("model") != model:
+                    continue
+                for qid, question in (json.loads(request_text).get("questions") or {}).items():
+                    result = response.get("answers", {}).get(qid)
+                    raw = raw_distribution(result) if result and question_signature(question) == signature else None
+                    if raw:
+                        found.append(raw)
+                if len(found) >= limit:
+                    break
+        return found[:limit]
 
     def review(self, case_id: str, review: str, final: dict, note: str) -> dict:
         with self.lock:
@@ -213,6 +280,7 @@ class Engine:
         non applica mai la calibrazione (le temperature sono fittate su testo).
         """
         state, questions = parse_request(body)
+        batch = batch_questions(body["questions"])
         body = {**body, "state": self.inline_images(state)}
         body.setdefault("image_max_side", self.image_max_side)
         store = self.memory if use_memory else None
@@ -224,10 +292,36 @@ class Engine:
             context = memory_context(body, questions, store, embedding)
 
         model_body = {k: v for k, v in body.items() if k != "memory"}
+        model_body["questions"] = without_batch_flag(body["questions"])
         if not calibrated:
             model_body["calibrated"] = False
         response = self.client.decide(model_body)
+        if batch:
+            self.calibrate_on_history(response, body["questions"], batch)
         return apply_memory_context(response, context, body, questions)
+
+    def calibrate_on_history(self, response: dict, questions: dict, qids: set) -> None:
+        """Calibrazione sullo storico delle domande indicate; ogni risposta riporta `batch_calibration`."""
+        from .confidence import answer, decision_confidence
+
+        for qid in sorted(qids):
+            result = response.get("answers", {}).get(qid)
+            raw = raw_distribution(result) if result else None
+            if raw is None:
+                continue
+            history = self.cases.history(question_signature(questions[qid]), response.get("model"))
+            info = {"cases": len(history), "min_cases": BATCH_MIN_CASES, "applied": False}
+            if len(history) >= BATCH_MIN_CASES:
+                question = parse_question(qid, without_batch_flag(questions)[qid])
+                mean = np.array([np.mean([h.get(key, 0.0) for h in history]) for key in question.keys])
+                p = np.array([raw[key] for key in question.keys]) / np.maximum(mean, 1e-9)
+                p = p / p.sum()
+                result.update(answer(question, p))
+                if result.get("min_confidence") is not None:
+                    decided = decision_confidence(question.type, p) >= result["min_confidence"]
+                    result["status"] = "decided" if decided else "uncertain"
+                info.update(applied=True, raw={key: raw[key] for key in question.keys})
+            result["batch_calibration"] = info
 
     # ----------------------------------------------------------------- media
 
@@ -319,11 +413,12 @@ def memory_view(item: Memory, similarity: float | None = None) -> dict:
     texts = item.meta.get("questions", {})
     labels = item.meta.get("labels", {})
     generic = {"true": "Sì", "false": "No"}  # ricordi senza etichette salvate
+    # "value" è la decisione grezza (es. "true"): l'interfaccia in inglese mostra Yes/No al posto di Sì/No.
     view = {
         "id": item.id, "text": describe_state(item.state)[:400], "plain": plain_text(item.state)[:400],
         "images": image_urls(item.state), "decisions": item.decisions, "note": item.note, "meta": item.meta,
         "readable": [{"question": texts.get(qid, qid.replace("_", " ")),
-                      "answer": labels.get(qid, {}).get(value, generic.get(value, value))}
+                      "answer": labels.get(qid, {}).get(value, generic.get(value, value)), "value": value}
                      for qid, value in item.decisions.items()],
     }
     if similarity is not None:
@@ -430,7 +525,7 @@ def create_app(engine: Engine, info: dict | None = None):
         body = {
             "state": [{"type": "text", "text": payload.get("context", "Fotogramma della telecamera:")},
                       {"type": "image", "base64": frame.partition(",")[2] if frame.startswith("data:") else frame}],
-            "questions": questions,
+            "questions": without_batch_flag(questions),  # mai dal vivo: i fotogrammi si somigliano
             "image_max_side": int(payload.get("max_side", 336)),
         }
         started = time.perf_counter()

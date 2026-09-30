@@ -98,6 +98,27 @@ def test_orderings_rotate_choice_and_reverse_score():
     assert all(sorted(column) == [0, 1, 2] for column in zip(*rotations))
     assert orderings(by_id["is_urgent"], 2) == [[0, 1], [1, 0]]
     assert orderings(by_id["frustration"], 3) == [[0, 1, 2], [2, 1, 0]]
+    # auto: tutte le rotazioni per noul e choice, diretto e inverso per le scale
+    assert orderings(by_id["department"], "auto") == rotations
+    assert orderings(by_id["is_urgent"], "auto") == [[0, 1], [1, 0]]
+    assert orderings(by_id["frustration"], "auto") == [[0, 1, 2], [2, 1, 0]]
+    for wrong in (0, "tutte", True):
+        with pytest.raises(ValueError):
+            orderings(by_id["department"], wrong)
+
+
+def test_yes_bias_correction_only_towards_no():
+    from egeria.confidence import log_softmax, remove_yes_shift, yes_bias_shift
+
+    leaning_yes = log_softmax(np.array([1.0, 0.0]))  # stato vuoto: P(Sì) = 0.73
+    leaning_no = log_softmax(np.array([0.0, 1.5]))
+    assert yes_bias_shift(leaning_yes) == pytest.approx(1.0)
+    assert yes_bias_shift(leaning_no) == 0.0  # senza informazioni il No è giusto: niente da togliere
+    answer = log_softmax(np.array([2.0, 0.0]))
+    corrected = remove_yes_shift(answer, yes_bias_shift(leaning_yes))
+    assert np.exp(corrected).sum() == pytest.approx(1.0)
+    assert corrected[0] - corrected[1] == pytest.approx(1.0)  # logit del Sì da 2 a 1
+    assert np.allclose(remove_yes_shift(answer, 0.0), answer)
 
 
 def test_messages_list_options_with_letters():
@@ -242,21 +263,34 @@ def _one(question_body):
 
 
 def test_new_types_parse():
-    number = _one({"type": "number", "instructions": "x", "criteria": {"bins": [0, 1, 3, None], "unit": "persone"}})
+    number = _one({"type": "estimate", "instructions": "x", "criteria": {"bins": [0, 1, 3, None], "unit": "persone"}})
     assert number.keys == ["0-1", "1-3", ">=3"] and number.params["unit"] == "persone"
     assert number.options[2].description == "3 persone or more"
-    opened = _one({"type": "open", "instructions": "x", "top_k": 3})
+    opened = _one({"type": "short_answer", "instructions": "x", "top_k": 3})
     assert opened.options == () and opened.params == {"top_k": 3}
+
+
+def test_old_type_names_still_accepted():
+    """`number` e `open` (i nomi fino al 29/09/2026) diventano `estimate` e `short_answer`."""
+    from egeria.server import answer_key
+
+    assert _one({"type": "number", "instructions": "x", "criteria": [0, 10, 20]}).type == "estimate"
+    assert _one({"type": "open", "instructions": "x"}).type == "short_answer"
+    estimate = answer(_one({"type": "number", "instructions": "x", "criteria": [0, 10, 20]}), [0.2, 0.8])
+    assert estimate["type"] == "estimate" and estimate["range"] == "10-20"
+    # le risposte già salvate nello storico, con i vecchi nomi, si leggono ancora
+    assert answer_key({"type": "number", "range": "10-20"}) == "10-20"
+    assert answer_key({"type": "open", "answer": "14,21"}) == "14,21"
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"type": "number", "instructions": "x", "criteria": [0, 1]},  # un solo intervallo
-        {"type": "number", "instructions": "x", "criteria": [0, 5, 3]},  # non crescente
-        {"type": "number", "instructions": "x", "criteria": [0, None, 3]},  # null interno
-        {"type": "open", "instructions": "x", "criteria": {"a": None}},
-        {"type": "open", "instructions": "x", "top_k": 0},
+        {"type": "estimate", "instructions": "x", "criteria": [0, 1]},  # un solo intervallo
+        {"type": "estimate", "instructions": "x", "criteria": [0, 5, 3]},  # non crescente
+        {"type": "estimate", "instructions": "x", "criteria": [0, None, 3]},  # null interno
+        {"type": "short_answer", "instructions": "x", "criteria": {"a": None}},
+        {"type": "short_answer", "instructions": "x", "top_k": 0},
         {"type": "multi", "instructions": "x", "criteria": {"a": None, "b": None}},  # tipi rimossi
         {"type": "rank", "instructions": "x", "criteria": {"a": None, "b": None}},
         {"type": "recall", "instructions": "x", "k": 2},
@@ -299,20 +333,20 @@ def test_state_reuse_policy():
     assert scorer._worth_sharing(10, 2) and not scorer._worth_sharing(0, 2)
 
 
-def test_number_answers():
-    number = _one({"type": "number", "instructions": "x", "criteria": [0, 10, 20]})
+def test_estimate_answers():
+    number = _one({"type": "estimate", "instructions": "x", "criteria": [0, 10, 20]})
     result = answer(number, [0.5, 0.5])
     assert result["value"] == pytest.approx(10.0)  # media dei punti medi 5 e 15
     assert result["interval"] == [pytest.approx(2.0), pytest.approx(18.0)]  # quantili 10% e 90%
     assert result["range"] == "0-10"
 
 
-def test_open_answers():
-    from egeria.confidence import merge_candidates, open_answer
+def test_short_answers():
+    from egeria.confidence import merge_candidates, short_answer
 
     merged = merge_candidates([(" Bianca", 0.5), ("bianca", 0.2), (" ", 0.1), ("grigia", 0.1)], top_k=2)
     assert merged == [{"text": "Bianca", "p": 0.7}, {"text": "grigia", "p": 0.1}]
-    assert open_answer(merged)["answer"] == "Bianca"
+    assert short_answer(merged)["answer"] == "Bianca"
 
 
 # ---------------------------------------------------------------- memoria
@@ -443,3 +477,18 @@ def test_describe_state_hides_image_data():
     described = describe_state([{"type": "text", "text": "Sinistro:"}, {"type": "image", "base64": "AAAA" * 1000}])
     assert "[image: base64]" in described and "AAAA" not in described
     assert describe_state([{"type": "image", "path": "examples/x.jpg"}]) == "[image: examples/x.jpg]"
+
+
+def test_threshold_split_counts_uncertain_answers():
+    from egeria.metrics import threshold_split
+
+    records = [
+        {"type": "choice", "probs": [0.9, 0.05, 0.05], "label": 0},  # confidenza 0.85: decisa, giusta
+        {"type": "choice", "probs": [0.4, 0.3, 0.3], "label": 1},    # confidenza 0.1: incerta, sbagliata
+        {"type": "noul", "probs": [0.8, 0.2], "label": 1},           # confidenza 0.6: decisa, sbagliata
+        {"type": "noul", "probs": [0.55, 0.45], "label": 0},         # confidenza 0.1: incerta, giusta
+    ]
+    split = threshold_split(records, 0.5)
+    assert split["uncertain_share"] == 0.5
+    assert split["decided_accuracy"] == 0.5 and split["uncertain_accuracy"] == 0.5
+    assert threshold_split(records, 0.99)["uncertain_share"] == 1.0

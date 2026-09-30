@@ -57,7 +57,28 @@ def test_state_reuse_matches_full_prompts(scorer):
 
 def test_status_and_open_answer(scorer):
     body = {**JEV_EXAMPLE, "min_confidence": 0.99,
-            "questions": {**JEV_EXAMPLE["questions"], "word": {"type": "open", "instructions": "Main topic, one word?"}}}
+            "questions": {**JEV_EXAMPLE["questions"], "word": {"type": "short_answer", "instructions": "Main topic, one word?"}}}
     answers = scorer.decide(body)["answers"]
     assert answers["department"]["status"] in ("decided", "uncertain") and answers["department"]["min_confidence"] == 0.99
-    assert answers["word"]["type"] == "open" and answers["word"]["answer"]
+    assert answers["word"]["type"] == "short_answer" and answers["word"]["answer"]
+
+
+def test_yes_correction_uses_empty_state_once(scorer):
+    """La correzione del Sì: spostamento ≥ 0 dallo stato vuoto, calcolato una volta e poi in cache."""
+    state, questions = parse_request(JEV_EXAMPLE)
+    scorer._empty_yes.clear()
+    raw = scorer.score(state, questions, "auto")
+    corrected = scorer.correct_yes_bias(scorer.score(state, questions, "auto"), "auto")
+    assert len(scorer._empty_yes) == 1  # una sola domanda Sì/No
+    for before, after in zip(raw, corrected):
+        if after.question.type == "noul":
+            assert after.yes_shift >= 0.0
+            assert (before.option_logits[0] - before.option_logits[1]) - (after.option_logits[0] - after.option_logits[1]) \
+                == pytest.approx(after.yes_shift, abs=1e-6)
+        else:
+            assert after.yes_shift == 0.0 and np.allclose(before.option_logits, after.option_logits)
+    cached = dict(scorer._empty_yes)
+    scorer.decide(JEV_EXAMPLE)
+    assert dict(scorer._empty_yes) == cached
+    plain = scorer.decide(JEV_EXAMPLE, yes_correction=False)["answers"]["is_urgent"]["noul"]
+    assert plain >= scorer.decide(JEV_EXAMPLE)["answers"]["is_urgent"]["noul"] - 1e-6
