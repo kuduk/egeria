@@ -85,6 +85,7 @@ The documentation is in English in [documentazione/en/](documentazione/en/) and 
 | [07-web-interface.md](documentazione/en/07-web-interface.md) | Web interface: startup, architecture (separate model and web servers, model API, token), the Ask page, live mode, history, memories, settings, API, acceptance test |
 | [08-state-reuse.md](documentazione/en/08-state-reuse.md) | State reuse: prefix computed once for all questions, verification, measurements, the `auto` mode rule |
 | [09-label-free-checks.md](documentazione/en/09-label-free-checks.md) | Label-free checks: option position, yes-bias with negations, Italian/English consistency; low-cost corrections and the default readout (all rotations, yes-bias correction, calibration on the history) |
+| [10-left-right.md](documentazione/en/10-left-right.md) | Left and right in images: the image path (EXIF, webcam), simple figures, body parts, 2B-Base vs 2B-Instruct |
 | [sources.md](documentazione/en/sources.md) | Sources by area |
 
 ## Layout

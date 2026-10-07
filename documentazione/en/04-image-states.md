@@ -124,6 +124,7 @@ The answers are identical and the probabilities match within bf16 noise.
 - **`image_max_side`** (optional, 64–4096): downscales the images, so the number of visual tokens and the latency go down (§4).
 - **Model loading.** `egeria decide` detects images in the state and loads the full model with the vision tower on its own (`--vision` forces it). Memory for the 2B in bf16 is 4.4 GB.
 - **Supported question types:** `noul`, `choice`, `score`, `estimate` and `short_answer`, with permutations and `min_confidence` (below the threshold the answer is `uncertain`).
+- **EXIF orientation** (since 05/10/2026): images read from disk or received as base64/url are turned the way the browser shows them. Before, a phone photo could arrive rotated or mirrored ([10-left-right.md](10-left-right.md) §1).
 - **Memory and the state vector (`/v1/embed`) also work with images:** the vector includes the visual tokens. Check: 5/6 in [06-memory.md](06-memory.md) §6.
 - **`short_answer` (a short answer: one word or a value) also works with images** and reads dates, amounts and codes (§7).
 - **Efficiency.** Since 29/09/2026 the instructions and images are computed once for all questions and permutations, when it pays off (`auto` mode, [08-state-reuse.md](08-state-reuse.md)). With small images and few questions each question keeps its full prompt, which is cheaper there.

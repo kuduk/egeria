@@ -152,10 +152,12 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 - **"It cannot be told":** a `choice` with an explicit "the state does not say" option instead of a `noul`. It gives the model a way out instead of a forced "Yes"; the yes-bias check in F0.5 will show how much it helps.
 - **Two frames or two cases in the same state,** with a `noul` "has anything changed?" or "is it the same case?". To be verified.
 
-**Separate investigation:** left/right in images, starting from the user's example. Leads to check:
-- `load_images` does not apply the EXIF orientation;
-- "right" is ambiguous (the person's right or the viewer's);
-- the webcam frame compared with what the user sees.
+**Left/right investigation: done on 05/10/2026** ([10-left-right.md](10-left-right.md)).
+- There is no swap: on figures the 2B is right 100% of the time.
+- The 2B-Base does not locate body parts (fixed answer); the 2B-Instruct does (88.5%).
+- Neither knows the *person's* own right.
+- An EXIF orientation bug was fixed; the webcam in the browser is clean.
+- To decide: Base or Instruct for images; left/right back among the checks (with the mirror); the person's frame in the first LoRA.
 
 ## 7. Open decisions
 

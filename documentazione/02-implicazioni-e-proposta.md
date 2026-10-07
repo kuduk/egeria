@@ -152,10 +152,12 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 - **"Non si può dire":** una `choice` con un'opzione esplicita "lo stato non lo dice" al posto di una `noul`. Dà al modello una via d'uscita invece del "Sì" forzato; il controllo sul "Sì" di F0.5 dirà quanto aiuta.
 - **Due fotogrammi o due casi nello stesso stato,** con una `noul` "è cambiato qualcosa?" oppure "è lo stesso caso?". Da verificare.
 
-**Indagine a parte:** destra/sinistra nelle immagini, a partire dall'esempio dell'utente. Indizi da verificare:
-- `load_images` non applica l'orientamento EXIF;
-- "destra" è ambigua (la destra della persona o di chi guarda);
-- il fotogramma della webcam rispetto a ciò che vede l'utente.
+**Indagine su destra/sinistra: fatta il 05/10/2026** ([10-destra-sinistra.md](10-destra-sinistra.md)).
+- Non c'è uno scambio: sulle figure il 2B risponde giusto al 100%.
+- Il 2B-Base non localizza le parti del corpo (risposta fissa); il 2B-Instruct sì (88.5%).
+- La destra *della persona* non la sa nessuno dei due.
+- Corretto un bug sull'orientamento EXIF; la webcam nel browser è pulita.
+- Da decidere: Base o Instruct per le immagini; destra/sinistra di nuovo fra i controlli (con lo specchio); la cornice della persona nel primo LoRA.
 
 ## 7. Decisioni aperte
 
