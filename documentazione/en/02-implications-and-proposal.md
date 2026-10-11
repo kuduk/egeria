@@ -134,19 +134,24 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 3. **Temperature + bias term (shift) calibration per option-count band**, evaluated out of domain. *Done on 29/09/2026 in a different, label-free form: all rotations, yes-bias correction from the empty state, optional calibration on the history ([09](09-label-free-checks.md) §9).*
 4. **F1** with a supervised proper loss, anti-shortcut data, permutations with a consistency loss, soft human labels.
 
-## 6. Roadmap (revised on 29/09/2026)
+## 6. Roadmap (revised on 29/09/2026, updated on 08/10/2026)
 
 | Phase | What | Where | Criterion for "done" |
 |---|---|---|---|
 | F0 | Setup and zero-shot baseline: letter logits on Qwen3.5 (0.8B/2B in bf16, 4B/9B in 4 bits) and dynamic-depth diagnostics | Locally | **Completed**: no small model beats the Prior zero-shot (see [03-baseline-f0.md](03-baseline-f0.md) §6) |
 | Simplification | Removed dynamic depth, `rank`, the `recall` question, `embed` inside `/v1/systemone`, `inject` | Locally | **Completed on 29/09/2026**: tests green, interface re-tested, model runs on text, images and memories |
 | **F0.5**, measure and speed up without training | 1) **State reuse** across questions and permutations, text and images: **done on 29/09/2026** ([08-state-reuse.md](08-state-reuse.md)). 2) **Label-free checks:** position (identical options), "Yes" (a question and its negation), language (the same question in Italian and in English): **done on 29/09/2026** ([09-label-free-checks.md](09-label-free-checks.md)). With 2 permutations a strong position preference remains; with all rotations it disappears, and on the 2B `choice` questions gain 7.8 points. The "Yes" flaw depends on model and domain. 3) Label-free **calibration**: **done on 29/09/2026** ([09](09-label-free-checks.md) §8–9). New defaults: all rotations of the options and, for Yes/No questions, the yes-bias correction from the empty state, applied towards No only (the full one created false alarms on rare events). On the 2B, on typed-decisions: +2.9 accuracy points [+1.7, +4.1] (choice +8.2), better NLL and ECE, 251 ms per case. Calibration **on the history** optional per question in the web server, from 50 cases (on the 2B up to 0.545), never for rare events nor live. Dropped: the fixed per-letter prior (PriDe) and empty-input correction for scales. 4) **Evaluation sets** in Italian and English: the one for the first LoRA plus a small generic text set | Locally | Same answers with lower latency. One number for each check. Decision on the permutations (taken: all rotations) |
+| **Is the model looking?** (high priority, right away) | A label-free signal in the response that marks as uncertain an answer given "out of habit" ([11](11-models-and-tools.md) §7). Three tests: 1) **empty state:** the answer on the real state is almost the same as on "N/A" or on a grey image, for every question type; 2) **rotations:** the option rotations disagree (the scorer already keeps them in `order_argmax`); 3) **mirror**, for side questions: the answer does not change on the mirrored image. Also used as a measure in the model comparison | Locally | Thresholds fixed **before** the results. The signal fires on the cases of [10](10-left-right.md) with a fixed answer (raised leg with the Base, the person's hand, chirality) and does not fire where the model answers well (rare events, image suite, synthetic figures) |
+| **Derived questions** (high priority) | In the API, a question computed from others with a rule (not, and, or, XOR, thresholds), with the probability propagated from those of the simple questions. The model reads, the code reasons: for example "is it the person's right hand" = "in the left half" XOR "seen from behind" ([11](11-models-and-tools.md) §7) | Locally | On the raised hands of [10](10-left-right.md) the derived question beats the direct one (a fixed answer today, 4/8). On close-ups, "is it a right hand?" from the three cues at least at the level of the manual recomposition (0.75) |
 | **New primitives** (zero-shot) | 1) **`span`**, right after F0.5: a piece of text copied verbatim from the state (invoice number, IBAN, name, date). It is the `short_answer` completion restricted to tokens that continue a piece present in the state, so it cannot make things up. Text states only. 2) **`locate`**, together with the left/right investigation: a box or a point in the image, from the coordinates that Qwen vision models can produce (about twenty generated tokens). 3) **`why`**, when working on the operator interface: the sentences of the state that drove the decision, found by removing one at a time and measuring how much the probability changes (N passes in one batch; text only at first) | Locally | Each has a test set and a threshold fixed **before** the results, and is kept only if it passes. For `span`: accuracy at least equal to `short_answer` on the same set, and zero answers that are not in the state |
-| **F1**, first LoRA on an image task | Task to be chosen (§7). Letter readout unchanged; soft CE + Brier loss; augmentations: permutations, negations; Italian and English. A single size: 2B if it fits in 8 GB, otherwise 0.8B | Locally | Better than zero-shot on the task. Fewer spurious "Yes" answers. No regression on text or on `suite_immagini` |
+| **F1**, first LoRA on an image task | Task to be chosen (§7). Letter readout unchanged; soft CE + Brier loss; augmentations: permutations, negations, mirror; Italian and English. **Plus label-free consistencies as losses** (symmetric KL between the two answers): mirror (P(right \| photo) = P(left \| mirrored photo)), negation, language, option rotations. They also adapt the model to one's own data, for example webcam frames, without labelling them ([11](11-models-and-tools.md) §7). A single size: 2B if it fits in 8 GB, otherwise 0.8B | Locally | Better than zero-shot on the task. Fewer spurious "Yes" answers. No regression on text or on `suite_immagini` |
 | **F2**, generalist LoRA | Text and images, Italian and English. Human labels (including multi-annotator ones, e.g. ChaosNLI) and the typed-decisions train split. Anti-shortcut data (§4) | Locally | Above the prior (0.478) and the memory vote (0.562), towards 0.766. No out-of-domain regression |
 | **F3**, scale | 4B/9B models, labels from a large teacher alongside the human ones | Rented GPU | Only if F2 shows a gain |
+| **Support tools** (low priority) | Tools that give the model facts where it is weak ([11](11-models-and-tools.md) §4 and §7): **MediaPipe** (left and right of body and hands; live mode sending only the skeleton, no images; pose memories by keypoint similarity; ready-made gestures), **OCR** for small text, a **detector** for counting, **barcodes and QR codes** | Locally, on the CPU | Each tool improves a measured case without worsening the others |
 
 **Parked:** trained dynamic depth, the model as an actuator (games, robots), streaming and continuous batching in the server.
+
+**Documented for later** (research of 07/10/2026, [11](11-models-and-tools.md) §8): step-by-step reasoning worsens spatial questions; small heads trained on encoder features as an alternative to LoRA; pointing models for `locate`; MirrorQA, SpinBench and 3DSRBench as external evaluation sets.
 
 **Usage examples to add to the documentation** (no new code):
 - **"It cannot be told":** a `choice` with an explicit "the state does not say" option instead of a `noul`. It gives the model a way out instead of a forced "Yes"; the yes-bias check in F0.5 will show how much it helps.
@@ -158,6 +163,18 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 - Neither knows the *person's* own right.
 - An EXIF orientation bug was fixed; the webcam in the browser is clean.
 - To decide: Base or Instruct for images; left/right back among the checks (with the mirror); the person's frame in the first LoRA.
+
+**Before the first LoRA: existing models and tools** (research of 07/10/2026, [11-models-and-tools.md](11-models-and-tools.md)).
+- No open model solves the person's own right, not even large ones.
+- **Intern-Decision** (Qwen3.5, Apache-2.0) exists, with our very method.
+- MediaPipe already gives left and right of the body and hands on the CPU.
+- AIST++ has research-only videos and no yoga: excluded as LoRA data.
+- Next steps, in this order (updated on 08/10/2026):
+  1. **the "is the model looking?" signal**, which the comparison also needs;
+  2. **model comparison** on our checks, starting with Intern-Decision;
+  3. **derived questions**;
+  4. only if needed, a linear probe and a LoRA on mirrored pairs with label-free consistencies;
+  5. at low priority, the support tools (MediaPipe, OCR, counting).
 
 ## 7. Open decisions
 
@@ -171,7 +188,7 @@ pointer head:   logit_i = f(h(</opt>_i), h(<decide>))   →  restricted softmax 
 4. **Jev API compatibility.** Done: `/v1/systemone` is exposed by both the model server and the web server.
 5. **License and publication.** Open release (Apache-2.0) or internal use?
 6. **Task for the first LoRA (F1).** Candidates:
-   - **dance poses:** AIST++, with labels computed from the body keypoints and phrased without left/right; the classic named poses as the evaluation set. Evidence from 29/09/2026 in favour: zero-shot, the 2B confuses one-leg poses with each other (the tree with the dancer), even with described options ([09](09-label-free-checks.md) §10.3);
+   - **dance poses:** AIST++ (note: research-only videos, no yoga; [11](11-models-and-tools.md) §5), with labels computed from the body keypoints and phrased without left/right; the classic named poses as the evaluation set. Evidence from 29/09/2026 in favour: zero-shot, the 2B confuses one-leg poses with each other (the tree with the dancer), even with described options ([09](09-label-free-checks.md) §10.3);
    - **Galaxy Zoo:** multiple-choice questions with the volunteers' vote fractions, i.e. true human probabilities;
    - **spatial relations (VSR):** only after the left/right investigation.
 

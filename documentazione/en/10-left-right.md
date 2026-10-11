@@ -135,7 +135,8 @@ Neither wins everywhere. On images and Yes/No questions the Instruct is stronger
    - or use the 2B-Instruct as the model server for image tasks.
 3. **For the person's own right:** ask in the image frame and convert in code. With a front-facing, non-mirrored webcam, the person's right is the left side of the image.
 4. **For training (F1):** the mirror gives **free labels**. A mirrored image has the answer reversed, and in the person's frame the leg changes too. Mirrored poses are a ready-made augmentation to teach both frames.
-5. **To decide:**
+5. **Before training:** the research on existing models and tools is in [11-models-and-tools.md](11-models-and-tools.md).
+6. **To decide:**
    - which model to use for images (Base or Instruct);
    - whether to put left/right back among the label-free checks, with consistency under mirroring as the measure;
    - whether the first LoRA should also teach the person's frame.

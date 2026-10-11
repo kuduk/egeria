@@ -135,7 +135,8 @@ Nessuno dei due vince su tutto. Sulle immagini e sulle Sì/No l'Instruct è più
    - oppure usare il 2B-Instruct come server del modello per i compiti sulle immagini.
 3. **Per la destra della persona:** chiederla nella cornice dell'immagine e convertirla nel codice. Con una webcam di fronte e non specchiata, la destra della persona è il lato sinistro dell'immagine.
 4. **Per il training (F1):** lo specchio dà **etichette gratis**. Un'immagine specchiata ha la risposta invertita, e in cornice della persona cambia anche la gamba. Le pose specchiate sono un'aumentazione già pronta per insegnare entrambe le cornici.
-5. **Da decidere:**
+5. **Prima di addestrare:** la ricerca su modelli e strumenti esistenti è in [11-modelli-e-strumenti.md](11-modelli-e-strumenti.md).
+6. **Da decidere:**
    - quale modello usare per le immagini (Base o Instruct);
    - se rimettere destra/sinistra fra i controlli senza etichette, con la coerenza con lo specchio come misura;
    - se il primo LoRA deve insegnare anche la cornice della persona.

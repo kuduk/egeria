@@ -82,7 +82,8 @@ Dettagli in [documentazione/07-interfaccia.md](documentazione/07-interfaccia.md)
 | [documentazione/07-interfaccia.md](documentazione/07-interfaccia.md) | Interfaccia web: avvio, architettura (modello e server web separati, API del modello, token), pagina Chiedi, dal vivo, storico, ricordi, impostazioni, API, collaudo |
 | [documentazione/08-riuso-dello-stato.md](documentazione/08-riuso-dello-stato.md) | Riuso dello stato: prefisso calcolato una volta per tutte le domande, verifica, misure, regola della modalità `auto` |
 | [documentazione/09-controlli-senza-etichette.md](documentazione/09-controlli-senza-etichette.md) | Controlli senza etichette: posizione delle opzioni, tendenza al "Sì" con le negazioni, coerenza fra italiano e inglese; correzioni a basso costo e lettura di default (tutte le rotazioni, correzione del Sì, calibrazione sullo storico) |
-| [documentazione/10-destra-sinistra.md](documentazione/10-destra-sinistra.md) | Destra e sinistra nelle immagini: percorso dell'immagine (EXIF, webcam), figure semplici, parti del corpo, 2B-Base contro 2B-Instruct |
+| [documentazione/10-destra-sinistra.md](documentazione/10-destra-sinistra.md) | Destra e sinistra nelle immagini: percorso dell'immagine (EXIF, webcam), figure semplici, parti del corpo, mani e chiralità, 2B-Base contro 2B-Instruct |
+| [documentazione/11-modelli-e-strumenti.md](documentazione/11-modelli-e-strumenti.md) | Prima di addestrare: modelli da provare (Intern-Decision, Qwen3.5-4B/9B, Qwen3-VL, InternVL3.5), rilevatori di punti del corpo (MediaPipe), letteratura su destra/sinistra e piano |
 | [documentazione/fonti.md](documentazione/fonti.md) | Elenco delle fonti per area |
 
 La documentazione è anche in inglese, in [documentazione/en/](documentazione/en/).
