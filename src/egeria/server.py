@@ -136,7 +136,7 @@ class CaseStore:
 
     def add(self, title: str, request: dict, response: dict) -> dict:
         flags = review_flags(response)
-        case_id = f"caso-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
+        case_id = f"caso-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"  # 4 caratteri collidevano (~2% con 50 casi in un secondo)
         with self.lock:
             self.db.execute(
                 "INSERT INTO cases VALUES (?,?,?,?,?,?,?,?,?,?,?)",

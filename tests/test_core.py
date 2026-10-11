@@ -492,3 +492,23 @@ def test_threshold_split_counts_uncertain_answers():
     assert split["uncertain_share"] == 0.5
     assert split["decided_accuracy"] == 0.5 and split["uncertain_accuracy"] == 0.5
     assert threshold_split(records, 0.99)["uncertain_share"] == 1.0
+
+
+def test_images_follow_exif_orientation(tmp_path):
+    """Una foto salvata ruotata con il tag EXIF arriva al modello come la vede l'utente."""
+    from PIL import Image, ImageDraw
+
+    from egeria.images import load_images
+
+    seen = Image.new("RGB", (400, 300), "white")
+    ImageDraw.Draw(seen).rectangle((20, 100, 120, 200), fill="red")  # rosso a sinistra
+    for tag, stored in ((6, seen.transpose(Image.Transpose.ROTATE_90)),     # telefono girato
+                        (2, seen.transpose(Image.Transpose.FLIP_LEFT_RIGHT))):  # salvata specchiata
+        exif = stored.getexif()
+        exif[0x0112] = tag
+        path = tmp_path / f"foto_{tag}.jpg"
+        stored.save(path, exif=exif)
+        [image] = load_images([{"type": "image", "path": str(path)}])
+        assert image.size == (400, 300)
+        red, white = image.getpixel((70, 150)), image.getpixel((330, 150))
+        assert red[0] > 200 and red[1] < 80 and min(white) > 200

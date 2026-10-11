@@ -362,6 +362,7 @@ La distanza da 0.766 è ciò che deve colmare la fase F1.
 | **AnyJev** (Nokia) | Qualsiasi LLM | Readout senza training + testa closed-form fittata su 100–500 etichette | – | Flip d'ordine 0.230 → 0.073; ECE 0.240 → 0.095 |
 | **qwen-rlcd** | Qwen3.5-0.8B | Prototipo di **prefix-fork** dello stato DeltaNet | – | – |
 | **SCX Router** (Knowledgator, arXiv 2609.02292) | Qwen3-0.6B causale + scorer bidirezionale leggero + testa GLiClass | Etichette valutate sopra un KV-cache persistente | 150k task | Blueprint ibrido decoder + encoder |
+| **Intern-Decision** (InternLM, 26/09/2026, Apache-2.0; aggiunto il 07/10) | **Qwen3.5** 0.8B/2B/4B, anche con immagini (fino a 8) | Lettere in un solo passaggio: uno scheletro JSON con un segnaposto per domanda, logit letti prima di ciascuno, poi calibrazione | Fine-tuning (dati non dettagliati nella scheda) | [vendor] typed-decisions 77.4 / 79.4 / 80.6; media dei loro benchmark 79.4 / 84.7 / 90.0 (Jev 88.7). Nessun numero sulle immagini. È il parente più stretto di Egeria: da confrontare ([11](11-modelli-e-strumenti.md) §3) |
 
 ### 5.3 Repliche su encoder e servizi
 

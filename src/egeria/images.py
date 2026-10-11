@@ -12,8 +12,13 @@ USER_AGENT = "Egeria/0.1 (decision model research)"
 
 
 def load_images(state: list, max_side: int | None = None) -> list:
-    """Immagini dello stato, nell'ordine in cui compaiono, convertite in RGB ed eventualmente ridotte."""
-    from PIL import Image
+    """Immagini dello stato, nell'ordine in cui compaiono, convertite in RGB ed eventualmente ridotte.
+
+    Si applica l'orientamento EXIF, come fa il browser: una foto scattata con il telefono girato
+    arriverebbe altrimenti ruotata di 90°, e con alcuni tag (2, 4, 5, 7) specchiata, cioè con destra
+    e sinistra scambiate rispetto a come la vede l'utente.
+    """
+    from PIL import Image, ImageOps
 
     images = []
     for number, part in enumerate(state):
@@ -27,7 +32,7 @@ def load_images(state: list, max_side: int | None = None) -> list:
                 image = Image.open(io.BytesIO(urllib.request.urlopen(request, timeout=30).read()))
             else:
                 image = Image.open(io.BytesIO(base64.b64decode(part["base64"])))
-            image = image.convert("RGB")
+            image = ImageOps.exif_transpose(image).convert("RGB")
         except (OSError, ValueError) as error:
             raise RequestError(f"state[{number}]: immagine non leggibile ({error})") from error
         if max_side:

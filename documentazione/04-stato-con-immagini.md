@@ -124,6 +124,7 @@ Le risposte sono identiche e le probabilità coincidono entro il rumore bf16.
 - **`image_max_side`** (opzionale, 64–4096): riduce le immagini, così i token visivi calano e la latenza scende (§4).
 - **Caricamento del modello.** `egeria decide` riconosce le immagini nello stato e carica da solo il modello completo con la torre visiva (`--vision` lo forza). La memoria del 2B in bf16 è 4.4 GB.
 - **Tipi di domanda supportati:** `noul`, `choice`, `score`, `estimate` e `short_answer`, con le permutazioni e `min_confidence` (sotto la soglia la risposta è `uncertain`).
+- **Orientamento EXIF** (dal 05/10/2026): le immagini lette dal disco o ricevute in base64/url vengono girate come le mostra il browser. Prima una foto del telefono poteva arrivare ruotata o specchiata ([10-destra-sinistra.md](10-destra-sinistra.md) §1).
 - **La memoria e il vettore dello stato (`/v1/embed`) funzionano anche con le immagini:** il vettore include i token visivi. Verifica: 5/6 in [06-memoria.md](06-memoria.md) §6.
 - **`short_answer` (una risposta breve: una parola o un valore) funziona anche con le immagini** e legge date, importi e codici (§7).
 - **Efficienza.** Dal 29/09/2026 istruzioni e immagini si calcolano una volta sola per tutte le domande e permutazioni, quando conviene (modalità `auto`, [08-riuso-dello-stato.md](08-riuso-dello-stato.md)). Con immagini piccole e poche domande resta il prompt intero per ogni domanda, che lì costa meno.
