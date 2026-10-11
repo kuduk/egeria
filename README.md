@@ -4,7 +4,7 @@
 
 <p align="center"><img src="src/egeria/web/img/logo.png" alt="Egeria" width="220"></p>
 
-<p align="center">[![Test](https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg)](https://github.com/kuduk/egeria/actions/workflows/tests.yml)</p>
+<p align="center"><a href="https://github.com/kuduk/egeria/actions/workflows/tests.yml"><img src="https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg" alt="Test"></a></p>
 
 > Named after the nymph Egeria, advisor to Numa Pompilius, king of Rome: a small, quick advisor that gives its opinion, and says how sure it is, to whoever actually decides (a large LLM, an agent, a person). Until 2026-09-28 the project was called **semLMM**; the package, command and folder have been renamed to `egeria`.
 

@@ -4,7 +4,7 @@
 
 <p align="center"><img src="src/egeria/web/img/logo.png" alt="Egeria" width="220"></p>
 
-<p align="center">[![Test](https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg)](https://github.com/kuduk/egeria/actions/workflows/tests.yml)</p>
+<p align="center"><a href="https://github.com/kuduk/egeria/actions/workflows/tests.yml"><img src="https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg" alt="Test"></a></p>
 
 > Il nome viene dalla ninfa Egeria, consigliera del re Numa Pompilio: un consigliere piccolo e rapido che dà il suo parere, e dice quanto ne è sicuro, a chi decide davvero (un LLM grande, un agente, una persona). Fino al 28/09/2026 il progetto si chiamava **semLMM**: pacchetto, comando e cartella sono stati rinominati in `egeria`.
 
