@@ -4,7 +4,7 @@
 
 <p align="center"><img src="src/egeria/web/img/logo.png" alt="Egeria" width="220"></p>
 
-<p align="center">[![Test](https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg)](https://github.com/kuduk/egeria/actions/workflows/tests.yml)</p>
+<p align="center"><a href="https://github.com/kuduk/egeria/actions/workflows/tests.yml"><img src="https://github.com/kuduk/egeria/actions/workflows/tests.yml/badge.svg" alt="Test"></a></p>
 
 > Named after the nymph Egeria, advisor to Numa Pompilius, king of Rome: a small, quick advisor that gives its opinion, and says how sure it is, to whoever actually decides (a large LLM, an agent, a person). Until 2026-09-28 the project was called **semLMM**; the package, command and folder have been renamed to `egeria`.
 
@@ -85,6 +85,8 @@ The documentation is in English in [documentazione/en/](documentazione/en/) and 
 | [07-web-interface.md](documentazione/en/07-web-interface.md) | Web interface: startup, architecture (separate model and web servers, model API, token), the Ask page, live mode, history, memories, settings, API, acceptance test |
 | [08-state-reuse.md](documentazione/en/08-state-reuse.md) | State reuse: prefix computed once for all questions, verification, measurements, the `auto` mode rule |
 | [09-label-free-checks.md](documentazione/en/09-label-free-checks.md) | Label-free checks: option position, yes-bias with negations, Italian/English consistency; low-cost corrections and the default readout (all rotations, yes-bias correction, calibration on the history) |
+| [10-left-right.md](documentazione/en/10-left-right.md) | Left and right in images: the image path (EXIF, webcam), simple figures, body parts, hands and chirality, 2B-Base vs 2B-Instruct |
+| [11-models-and-tools.md](documentazione/en/11-models-and-tools.md) | Before training: models to try (Intern-Decision, Qwen3.5-4B/9B, Qwen3-VL, InternVL3.5), body keypoint detectors (MediaPipe), literature on left/right and plan |
 | [sources.md](documentazione/en/sources.md) | Sources by area |
 
 ## Layout

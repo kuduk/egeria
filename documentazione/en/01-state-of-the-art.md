@@ -362,6 +362,7 @@ The gap to 0.766 is what phase F1 has to close.
 | **AnyJev** (Nokia) | Any LLM | Training-free readout + closed-form head fitted on 100–500 labels | – | Order flips 0.230 → 0.073; ECE 0.240 → 0.095 |
 | **qwen-rlcd** | Qwen3.5-0.8B | Prototype of a DeltaNet state **prefix-fork** | – | – |
 | **SCX Router** (Knowledgator, arXiv 2609.02292) | Causal Qwen3-0.6B + lightweight bidirectional scorer + GLiClass head | Labels scored on top of a persistent KV-cache | 150k tasks | Hybrid decoder + encoder blueprint |
+| **Intern-Decision** (InternLM, 26/09/2026, Apache-2.0; added on 07/10) | **Qwen3.5** 0.8B/2B/4B, with images too (up to 8) | Letters in one pass: a JSON skeleton with one placeholder per question, logits read before each, then calibration | Fine-tune (data not detailed in the card) | [vendor] typed-decisions 77.4 / 79.4 / 80.6; average of their benchmarks 79.4 / 84.7 / 90.0 (Jev 88.7). No numbers on images. The closest relative of Egeria: to compare ([11](11-models-and-tools.md) §3) |
 
 ### 5.3 Encoder replications and services
 

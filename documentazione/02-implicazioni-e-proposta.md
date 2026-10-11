@@ -134,28 +134,47 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 3. **Calibrazione temperatura + spostamento per fascia di opzioni**, valutata fuori dominio. *Fatta il 29/09/2026 in un'altra forma, senza etichette: tutte le rotazioni, correzione del Sì dallo stato vuoto, calibrazione sullo storico facoltativa ([09](09-controlli-senza-etichette.md) §9).*
 4. **F1** con loss supervisionata propria, dati contro le scorciatoie, permutazioni con loss di coerenza, etichette umane soft.
 
-## 6. Roadmap (rivista il 29/09/2026)
+## 6. Roadmap (rivista il 29/09/2026, aggiornata l'08/10/2026)
 
 | Fase | Cosa | Dove | Criterio per dire "fatto" |
 |---|---|---|---|
 | F0 | Setup e baseline zero-shot: logit delle lettere su Qwen3.5 (0.8B/2B in bf16, 4B/9B in 4 bit) e diagnostica della profondità dinamica | In locale | **Completata**: nessun modello piccolo batte la Prior zero-shot (vedi [03-baseline-f0.md](03-baseline-f0.md) §6) |
 | Semplificazione | Tolti profondità dinamica, `rank`, la domanda `recall`, `embed` dentro `/v1/systemone`, `inject` | In locale | **Completata il 29/09/2026**: test verdi, interfaccia ricollaudata, prove con il modello su testo, immagini e ricordi |
 | **F0.5**, misurare e accelerare senza training | 1) **Riuso dello stato** fra domande e permutazioni, testo e immagini: **fatto il 29/09/2026** ([08-riuso-dello-stato.md](08-riuso-dello-stato.md)). 2) **Controlli senza etichette:** posizione (opzioni identiche), "Sì" (domanda e sua negazione), lingua (stessa domanda in italiano e in inglese): **fatti il 29/09/2026** ([09-controlli-senza-etichette.md](09-controlli-senza-etichette.md)). Con 2 permutazioni resta una forte preferenza per la posizione; con tutte le rotazioni sparisce, e sul 2B le `choice` guadagnano 7.8 punti. Il "Sì" dipende da modello e dominio. 3) **Calibrazione** senza etichette: **fatta il 29/09/2026** ([09](09-controlli-senza-etichette.md) §8–9). Default nuovi: tutte le rotazioni delle opzioni, e per le Sì/No la correzione della tendenza al Sì dallo stato vuoto, applicata solo verso il No (quella piena creava falsi allarmi sugli eventi rari). Sul 2B, su typed-decisions: +2.9 punti di accuratezza [+1.7, +4.1] (scelta +8.2), NLL ed ECE migliori, 251 ms per caso. Calibrazione **sullo storico** facoltativa per domanda nel server web, da 50 casi (sul 2B fino a 0.545), mai per eventi rari né dal vivo. Scartate: la preferenza fissa per lettera (PriDe) e la correzione a input vuoto per le scale. 4) **Set di valutazione** in italiano e inglese: quello del primo LoRA più un piccolo set di testo generico | In locale | Stesse risposte e latenza ridotta. Un numero per ciascun controllo. Decisione sulle permutazioni (presa: tutte le rotazioni) |
+| **Il modello sta guardando?** (priorità alta, subito) | Un segnale senza etichette nella risposta, che segna come incerta una risposta data "per abitudine" ([11](11-modelli-e-strumenti.md) §7). Tre prove: 1) **stato vuoto:** la risposta sullo stato vero è quasi uguale a quella su "N/A" o su un'immagine grigia, per tutti i tipi di domanda; 2) **rotazioni:** le rotazioni delle opzioni non concordano (lo scorer le conserva già in `order_argmax`); 3) **specchio**, per le domande di lato: la risposta non cambia sull'immagine specchiata. Serve anche come misura nel confronto dei modelli | In locale | Soglie fissate **prima** dei risultati. Il segnale scatta sui casi di [10](10-destra-sinistra.md) con risposta fissa (gamba sollevata con il Base, mano della persona, chiralità) e non scatta dove il modello risponde bene (eventi rari, suite immagini, figure sintetiche) |
+| **Domande derivate** (priorità alta) | Nell'API una domanda calcolata da altre con una regola (non, e, o, XOR, soglie), con la probabilità che si propaga da quelle delle domande semplici. Il modello legge, il codice ragiona: per esempio "è la mano destra della persona" = "nella metà sinistra" XOR "di spalle" ([11](11-modelli-e-strumenti.md) §7) | In locale | Sulle mani alzate di [10](10-destra-sinistra.md) la domanda derivata batte quella diretta (oggi risposta fissa, 4/8). Sui primi piani, "è una mano destra?" dai tre indizi almeno al livello della ricomposizione a mano (0.75) |
 | **Primitive nuove** (zero-shot) | 1) **`span`**, subito dopo F0.5: un pezzo di testo copiato alla lettera dallo stato (numero di fattura, IBAN, nome, data). È il completamento di `short_answer` limitato ai token che continuano un pezzo presente nello stato, quindi non può inventare. Solo per stati di testo. 2) **`locate`**, insieme all'indagine su destra/sinistra: un riquadro o un punto nell'immagine, dalle coordinate che i modelli visivi Qwen sanno produrre (una ventina di token generati). 3) **`why`**, quando si lavora sull'interfaccia per gli operatori: le frasi dello stato che hanno deciso, togliendone una alla volta e misurando quanto cambia la probabilità (N passaggi in un batch; all'inizio solo testo) | In locale | Ognuna ha un set di prova e una soglia fissati **prima** dei risultati, e si tiene solo se la supera. Per `span`: accuratezza almeno pari a `short_answer` sullo stesso set, e zero risposte non presenti nello stato |
-| **F1**, primo LoRA su un compito con le immagini | Compito da scegliere (§7). Readout a lettere invariato; loss soft CE + Brier; aumentazioni: permutazioni, negazioni; italiano e inglese. Una sola taglia: 2B se entra in 8 GB, altrimenti 0.8B | In locale | Meglio dello zero-shot sul compito. Meno "Sì" di troppo. Nessun peggioramento sul testo e su `suite_immagini` |
+| **F1**, primo LoRA su un compito con le immagini | Compito da scegliere (§7). Readout a lettere invariato; loss soft CE + Brier; aumentazioni: permutazioni, negazioni, specchio; italiano e inglese. **Più le coerenze senza etichette come perdite** (KL simmetrica fra le due risposte): specchio (P(destra \| foto) = P(sinistra \| foto specchiata)), negazione, lingua, rotazioni delle opzioni. Servono anche ad adattare il modello ai propri dati, per esempio ai fotogrammi della webcam, senza etichettarli ([11](11-modelli-e-strumenti.md) §7). Una sola taglia: 2B se entra in 8 GB, altrimenti 0.8B | In locale | Meglio dello zero-shot sul compito. Meno "Sì" di troppo. Nessun peggioramento sul testo e su `suite_immagini` |
 | **F2**, LoRA generalista | Testo e immagini, italiano e inglese. Etichette umane (anche con più annotatori, per esempio ChaosNLI) e il train di typed-decisions. Dati contro le scorciatoie (§4) | In locale | Sopra la prior (0.478) e il voto dei ricordi (0.562), verso 0.766. Nessun peggioramento fuori dominio |
 | **F3**, scala | Modelli 4B/9B, etichette da un teacher grande insieme a quelle umane | GPU a noleggio | Solo se F2 mostra un guadagno |
+| **Strumenti di supporto** (priorità bassa) | Strumenti che danno fatti al modello dove è debole ([11](11-modelli-e-strumenti.md) §4 e §7): **MediaPipe** (destra e sinistra del corpo e delle mani; dal vivo solo lo scheletro, senza mandare immagini; ricordi di pose per somiglianza dei punti; gesti già pronti), **OCR** per i testi minuti, un **rilevatore** per contare, **codici a barre e QR** | In locale, sulla CPU | Ogni strumento migliora un caso misurato senza peggiorare gli altri |
 
 **Parcheggiati:** profondità dinamica addestrata, il modello come attuatore (giochi, robot), streaming e batching continuo nel server.
+
+**Documentati per dopo** (ricerca del 07/10/2026, [11](11-modelli-e-strumenti.md) §8): il ragionamento passo passo peggiora le domande spaziali; piccole teste addestrate sulle caratteristiche dell'encoder come alternativa al LoRA; modelli che indicano un punto per `locate`; MirrorQA, SpinBench e 3DSRBench come set di valutazione esterni.
 
 **Esempi d'uso da aggiungere alla documentazione** (nessun codice nuovo):
 - **"Non si può dire":** una `choice` con un'opzione esplicita "lo stato non lo dice" al posto di una `noul`. Dà al modello una via d'uscita invece del "Sì" forzato; il controllo sul "Sì" di F0.5 dirà quanto aiuta.
 - **Due fotogrammi o due casi nello stesso stato,** con una `noul` "è cambiato qualcosa?" oppure "è lo stesso caso?". Da verificare.
 
-**Indagine a parte:** destra/sinistra nelle immagini, a partire dall'esempio dell'utente. Indizi da verificare:
-- `load_images` non applica l'orientamento EXIF;
-- "destra" è ambigua (la destra della persona o di chi guarda);
-- il fotogramma della webcam rispetto a ciò che vede l'utente.
+**Indagine su destra/sinistra: fatta il 05/10/2026** ([10-destra-sinistra.md](10-destra-sinistra.md)).
+- Non c'è uno scambio: sulle figure il 2B risponde giusto al 100%.
+- Il 2B-Base non localizza le parti del corpo (risposta fissa); il 2B-Instruct sì (88.5%).
+- La destra *della persona* non la sa nessuno dei due.
+- Corretto un bug sull'orientamento EXIF; la webcam nel browser è pulita.
+- Da decidere: Base o Instruct per le immagini; destra/sinistra di nuovo fra i controlli (con lo specchio); la cornice della persona nel primo LoRA.
+
+**Prima del primo LoRA: modelli e strumenti esistenti** (ricerca del 07/10/2026, [11-modelli-e-strumenti.md](11-modelli-e-strumenti.md)).
+- La destra della persona non la risolve nessun modello aperto, nemmeno grande.
+- Esiste **Intern-Decision** (Qwen3.5, Apache-2.0), con il nostro stesso metodo.
+- MediaPipe dà già destra e sinistra del corpo e delle mani sulla CPU.
+- AIST++ ha video solo per la ricerca accademica e niente yoga: escluso come dato per il LoRA.
+- Prossimi passi, in quest'ordine (aggiornato l'08/10/2026):
+  1. **il segnale "il modello sta guardando?"**, che serve anche al confronto;
+  2. **confronto dei modelli** sui nostri controlli, a partire da Intern-Decision;
+  3. **domande derivate**;
+  4. solo se serve, sonda lineare e LoRA con coppie specchiate e coerenze senza etichette;
+  5. a priorità bassa, gli strumenti di supporto (MediaPipe, OCR, conteggio).
 
 ## 7. Decisioni aperte
 
@@ -169,7 +188,7 @@ testa pointer:  logit_i = f(h(</opt>_i), h(<decide>))   →  softmax ristretta /
 4. **Compatibilità API Jev.** Fatta: `/v1/systemone` è esposto sia dal server del modello sia dal server web.
 5. **Licenza e pubblicazione.** Rilascio open (Apache-2.0) o uso interno?
 6. **Compito del primo LoRA (F1).** Candidati:
-   - **pose di danza:** AIST++, con etichette calcolate dai punti del corpo, formulate senza destra/sinistra; le pose classiche con nome come set di valutazione. Dato del 29/09/2026 a favore: zero-shot il 2B confonde fra loro le pose su una gamba (l'albero con il ballerino), anche con le opzioni descritte ([09](09-controlli-senza-etichette.md) §10.3);
+   - **pose di danza:** AIST++ (attenzione: video solo per la ricerca accademica, niente yoga; [11](11-modelli-e-strumenti.md) §5), con etichette calcolate dai punti del corpo, formulate senza destra/sinistra; le pose classiche con nome come set di valutazione. Dato del 29/09/2026 a favore: zero-shot il 2B confonde fra loro le pose su una gamba (l'albero con il ballerino), anche con le opzioni descritte ([09](09-controlli-senza-etichette.md) §10.3);
    - **Galaxy Zoo:** domande a scelta con le frazioni di voto dei volontari, cioè probabilità umane vere;
    - **relazioni spaziali (VSR):** solo dopo l'indagine su destra/sinistra.
 

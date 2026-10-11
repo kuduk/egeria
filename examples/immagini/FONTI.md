@@ -69,3 +69,28 @@ Scaricate il 29/09/2026 da Wikimedia Commons (miniature a 640 px, convertite in 
 | `pose/2010_365_265_tree_yoga_5310864461.jpg` | senza_persone | [2010-365-265 Tree Yoga (5310864461).jpg](https://commons.wikimedia.org/wiki/File:2010-365-265_Tree_Yoga_(5310864461).jpg) | cogdogblog | CC BY 2.0 |
 | `pose/yoga_in_nature.jpg` | senza_persone | [Yoga in nature.jpg](https://commons.wikimedia.org/wiki/File:Yoga_in_nature.jpg) | Drvidyashankar74 | CC BY-SA 4.0 |
 | `pose/vrksasana_50090707147.jpg` | senza_persone | [Vrksasana (50090707147).jpg](https://commons.wikimedia.org/wiki/File:Vrksasana_(50090707147).jpg) | Channel City Camera Club from Santa Barbara, US | CC BY 2.0 |
+
+## Mani alzate (`mani/`)
+
+Scaricate il 05/10/2026 da Wikimedia Commons (miniature a 640 px), per l'indagine su destra e sinistra ([scripts/indagine_destra_sinistra.py](../../scripts/indagine_destra_sinistra.py), [documentazione/10](../../documentazione/10-destra-sinistra.md)). Tutte con la persona vista di fronte: Bessie Smith alza la mano sinistra, gli altri la destra.
+
+| File | Opera originale | Autore | Licenza |
+|---|---|---|---|
+| `mani/bessie_smith.jpg` | [Bessie Smith, three-quarter length portrait, standing, facing front, with left hand raised LCCN2004663575.jpg](https://commons.wikimedia.org/wiki/File:Bessie_Smith,_three-quarter_length_portrait,_standing,_facing_front,_with_left_hand_raised_LCCN2004663575.jpg) | Carl Van Vechten | Public domain |
+| `mani/poliziotta_giuramento.jpg` | [Officer Natalie Corona swearing-in.jpg](https://commons.wikimedia.org/wiki/File:Officer_Natalie_Corona_swearing-in.jpg) | City of Davis | Public domain |
+| `mani/statuetta_saluto.jpg` | [Standing man waving-AO 22134-IMG 0339-white.jpg](https://commons.wikimedia.org/wiki/File:Standing_man_waving-AO_22134-IMG_0339-white.jpg) | Rama | CC BY-SA 3.0 fr |
+| `mani/giuramento_ritaglio.jpg` | [Swearing in as Secretary of Energy.jpg](https://commons.wikimedia.org/wiki/File:Swearing_in_as_Secretary_of_Energy.jpg) (ritagliata: solo l'uomo a sinistra) | ENERGY.GOV | Public domain |
+
+### Primi piani di mani (`mani/primi_piani/`)
+
+Scaricati il 05/10/2026 da Wikimedia Commons (miniature a 512 px), per la verifica della chiralità. Mani 1–5 sinistre, 6–7 destre (etichette dagli autori, verificate guardando palmo, dorso e pollice; la mano 2 non ha etichetta dell'autore ed è stata ricavata così).
+
+| File | Opera originale | Autore | Licenza |
+|---|---|---|---|
+| `mani/primi_piani/mano_1.jpg` | [Hand of a Human Male.png](https://commons.wikimedia.org/wiki/File:Hand_of_a_Human_Male.png) | Eyefive45 | CC BY-SA 4.0 |
+| `mani/primi_piani/mano_2.jpg` | [Humans Hand.jpg](https://commons.wikimedia.org/wiki/File:Humans_Hand.jpg) | Jkkklll m | CC0 |
+| `mani/primi_piani/mano_3.jpg` | [Left Hand of a Female Human.png](https://commons.wikimedia.org/wiki/File:Left_Hand_of_a_Female_Human.png) | Lezlie Rewatch | CC0 |
+| `mani/primi_piani/mano_4.jpg` | [Left hand holding pen.jpg](https://commons.wikimedia.org/wiki/File:Left_hand_holding_pen.jpg) | Magioladitis | CC BY-SA 4.0 |
+| `mani/primi_piani/mano_5.jpg` | [Left-palm.jpg](https://commons.wikimedia.org/wiki/File:Left-palm.jpg) | 些細な日常 | CC BY-SA 4.0 |
+| `mani/primi_piani/mano_6.jpg` | [Right Hand Fingers.png](https://commons.wikimedia.org/wiki/File:Right_Hand_Fingers.png) | Eyefive45 | CC BY-SA 4.0 |
+| `mani/primi_piani/mano_7.jpg` | [Right Hand Palm.png](https://commons.wikimedia.org/wiki/File:Right_Hand_Palm.png) | Eyefive45 | CC BY-SA 4.0 |
